@@ -1,0 +1,67 @@
+# Cloud Native Build 配置文件
+version: 1.0
+
+# 环境配置
+environment:
+  nodejs: "18.x"  # 使用 Node.js 18.x 版本
+
+# 构建阶段
+stages:
+  - name: install
+    steps:
+      - name: Install Dependencies
+        run: npm install
+
+  - name: build
+    steps:
+      - name: Lint JavaScript Files
+        run: |
+          npm install eslint --save-dev
+          npx eslint .
+
+      - name: Check manifest.json
+        run: |
+          node -e "const manifest = require('./manifest.json'); process.exit(manifest ? 0 : 1)"
+
+  - name: package
+    steps:
+      - name: Create Extension Package
+        run: |
+          mkdir -p dist
+          zip -r dist/taskmaster.zip . -x "node_modules/*" "dist/*" ".git/*" "*.zip"
+
+# 缓存配置
+cache:
+  paths:
+    - node_modules/
+    - dist/
+
+# 制品配置
+artifacts:
+  paths:
+    - dist/taskmaster.zip
+
+# 部署配置
+deploy:
+  # Chrome Web Store 部署配置（需要配置相应的密钥）
+  chrome_web_store:
+    enabled: false
+    # 如需启用，取消下面的注释并填入相应的值
+    # client_id: ${CHROME_CLIENT_ID}
+    # client_secret: ${CHROME_CLIENT_SECRET}
+    # refresh_token: ${CHROME_REFRESH_TOKEN}
+    # extension_id: ${CHROME_EXTENSION_ID}
+
+# 通知配置
+notifications:
+  email:
+    on_success: change
+    on_failure: always
+
+# 资源限制
+resources:
+  cpu: 1
+  memory: 1Gi
+
+# 构建超时设置
+timeout: 30m

@@ -1,45 +1,498 @@
 .container {
-  width: 300px;
+  width: 340px;  /* 增加40px宽度 */
   padding: 15px;
 }
 
-input {
-  width: 80%;
-  padding: 8px;
-  margin-bottom: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+/* 搜索功能样式 */
+.search-container {
+  margin: 15px 0;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 12px;
+  background-color: #fafafa;
 }
 
-button {
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#search-input {
+  flex: 1;
   padding: 8px 12px;
-  background: #4CAF50;
-  color: white;
-  border: none;
+  border: 1px solid #ddd;
   border-radius: 4px;
+  font-size: 14px;
+  background-color: white;
+}
+
+#search-input:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.search-clear-btn {
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 16px;
+  color: #666;
+  min-width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-clear-btn:hover {
+  background-color: #e8e8e8;
+  color: #333;
+}
+
+.search-filters {
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-checkbox input[type="checkbox"] {
+  margin: 0;
   cursor: pointer;
 }
 
-ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.filter-checkbox span {
+  white-space: nowrap;
 }
 
-li {
-  padding: 10px;
+.filter-checkbox:hover {
+  color: #333;
+}
+
+/* 搜索结果高亮 */
+.search-highlight {
+  background-color: #ffeb3b;
+  padding: 1px 2px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+/* 搜索无结果提示 */
+.search-no-results {
+  text-align: center;
+  padding: 20px;
+  color: #999;
+  font-size: 14px;
+}
+
+/* 搜索统计信息 */
+.search-stats {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 10px;
+  padding: 5px 0;
   border-bottom: 1px solid #eee;
+}
+
+/* 搜索结果分组 */
+.search-section {
+  margin-bottom: 20px;
+}
+
+.search-section-title {
+  font-size: 14px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.search-section ul {
+  padding-inline-start: 5px;
+}
+
+/* 新增任务列表样式 */
+.task-list {
+  padding-inline-start: 5px;
+  width: 100%;  /* 填充容器宽度 */
+}
+
+/* 调整表单布局 */
+#taskForm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;  /* 确保表单填满容器 */
+}
+
+#new-task {
+  flex-grow: 1;  /* 输入框占据剩余空间 */
+}
+
+#task-list ul {
+  padding-inline-start: 5px;
+}
+
+.pinned-section ul,
+.date-content ul,
+.archive-section ul {
+  padding-inline-start: 5px;
+}
+
+.task-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
 }
 
-.priority {
-  color: #ff5722;
+.task-actions button {
+  margin-left: 8px;
+  padding: 2px 6px;
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+/* 统一表单元素高度 */
+#taskForm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#new-task, button[type='submit'] {
+  height: 32px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-radius: 4px;
+}
+
+/* 删除按钮样式 */
+.task-item .delete-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  background: #ff4444;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.task-item .delete-btn:hover {
+  background: #cc0000;
+}
+
+
+/* 时间显示优化 */
+.time {
+  font-size: 0.9em;
+  color: #999;
+  margin-left: 8px;
+}
+
+/* 新增任务头部样式 */
+.task-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.task-title {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.task-title.completed {
+  text-decoration: line-through;
+  color: #888;
+}
+
+.date-section {
+  margin-bottom: 15px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.date-header {
+  font-size: 14px;
   font-weight: bold;
+  margin: 10px 0 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
 }
 
-.timestamp {
-  font-size: 0.8em;
+.toggle-icon {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.archive-section {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 2px solid #eee;
+}
+
+.archive-title {
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+/* 时间信息样式 */
+.task-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+}
+
+.task-checkbox {
+  margin-top: 4px;
+}
+
+.info-container {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-title {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.time-info {
+  font-size: 0.9em;
   color: #666;
+  line-height: 1.4;
+}
+
+.delete-btn {
+  align-self: center;
+  margin-left: auto;
+}
+
+.time-label {
+  display: block;
+  color: #999;
+  margin-top: 4px;
+}
+
+.time-value {
+  display: inline-block;
+  margin-right: 12px;
+}
+
+.time-value.completed {
+  color: #4CAF50;
+  font-weight: 500;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.pin-btn {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 4px;
+  font-size: 1.1em;
+  opacity: 0.6;
+}
+
+.pin-btn:hover {
+  opacity: 1;
+  color: #2c3e50;
+}
+
+/* 归档任务样式 */
+.archive-section .archived-task {
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.archive-section .archived-title {
+  font-size: 14px;
+  color: #666;
+  word-break: break-word;
+}
+
+.archive-section .archived-completion-time {
+  font-size: 12px;
+  color: #999;
+  margin-top: 4px;
+}
+
+.archived-task {
+  display: flex;
+  flex-direction: column;
+  border: none;
+}
+
+.archived-title {
+  font-size: 0.9em;
+  color: #808080;
+}
+
+.archived-completion-time {
+  font-size: 0.8em;
+  color: #d3d3d3;
+}
+
+/* 备注功能样式 */
+.task-notes {
+  font-size: 0.85em;
+  color: #555;
+  margin-top: 6px;
+  padding: 4px 0;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.task-notes-label {
+  color: #999;
+  font-weight: 500;
+}
+
+.task-clickable {
+  cursor: pointer;
+}
+
+.task-clickable:hover .info-container {
+  background-color: #f8f9fa;
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+}
+
+/* 模态对话框样式 */
+.notes-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.notes-modal-content {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  width: 300px;
+  max-width: 90%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  position: relative;
+}
+
+.notes-modal-header {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 15px;
+  color: #333;
+  padding-right: 30px;
+}
+
+.notes-modal-close {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #999;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notes-modal-close:hover {
+  color: #666;
+}
+
+.notes-textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+  margin-bottom: 15px;
+}
+
+.notes-textarea:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.notes-modal-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.notes-modal-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.notes-modal-btn.save {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.notes-modal-btn.save:hover {
+  background-color: #45a049;
+}
+
+.notes-modal-btn.cancel {
+  background-color: #f5f5f5;
+  color: #666;
+  border: 1px solid #ddd;
+}
+
+.notes-modal-btn.cancel:hover {
+  background-color: #e8e8e8;
 }

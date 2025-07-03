@@ -1,13 +1,43 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
+  <title>TaskMaster</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="container">
-    <input type="text" id="todoInput" placeholder="添加新待办事项...">
-    <button id="addBtn">➕</button>
-    <ul id="todoList"></ul>
+    <form id="taskForm">
+      <input type="text" id="new-task" placeholder="输入新任务..." autocomplete="off">
+      <button type="submit">➕</button>
+    </form>
+    
+    <!-- 搜索功能 -->
+    <div class="search-container">
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="搜索任务..." autocomplete="off">
+        <button id="search-clear" class="search-clear-btn" title="清空搜索">×</button>
+      </div>
+      <div class="search-filters">
+        <label class="filter-checkbox">
+          <input type="checkbox" id="search-active" checked>
+          <span>活动任务</span>
+        </label>
+        <label class="filter-checkbox">
+          <input type="checkbox" id="search-completed" checked>
+          <span>已完成</span>
+        </label>
+        <label class="filter-checkbox">
+          <input type="checkbox" id="search-notes">
+          <span>包含备注</span>
+        </label>
+      </div>
+    </div>
+    <ul id="task-list" class="task-list"></ul>
+    <div class="action-footer">
+      <button id="share-btn" title="分享任务清单">转发</button>
+      <button id="settings-btn" title="打开设置">设置</button>
+    </div>
   </div>
   <script src="popup.js"></script>
 </body>

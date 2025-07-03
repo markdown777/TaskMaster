@@ -1,11 +1,295 @@
 <!DOCTYPE html>
 <html>
+<head>
+  <meta charset="utf-8">
+  <title>TaskMaster 设置</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 700px;
+      margin: 0 auto;
+      background-color: #f5f5f5;
+    }
+    
+    h2 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 28px;
+    }
+    
+    .setting-item {
+      margin-bottom: 25px;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background-color: white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    h3 {
+      color: #333;
+      margin-top: 0;
+      margin-bottom: 15px;
+      font-size: 18px;
+      border-bottom: 2px solid #e0e0e0;
+      padding-bottom: 8px;
+    }
+    
+    .setting-group {
+      margin-left: 10px;
+    }
+    
+    label {
+      display: flex;
+      align-items: center;
+      margin-bottom: 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    
+    input[type="checkbox"] {
+      margin-right: 10px;
+      transform: scale(1.2);
+    }
+    
+    input[type="password"], input[type="text"] {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-left: 10px;
+      font-size: 14px;
+      width: 200px;
+    }
+    
+    select {
+      padding: 6px 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-left: 10px;
+      font-size: 14px;
+    }
+    
+    .setting-description {
+      font-size: 12px;
+      color: #666;
+      margin-left: 10px;
+      font-style: italic;
+    }
+    
+    .warning-text {
+      color: #ff6b6b;
+      font-size: 12px;
+      margin-top: 5px;
+      margin-left: 10px;
+    }
+    
+    /* 按钮样式 */
+    .action-btn {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px;
+      transition: background-color 0.3s;
+    }
+    
+    .action-btn.primary {
+      background: #4CAF50;
+      color: white;
+    }
+    
+    .action-btn.primary:hover {
+      background: #45a049;
+    }
+    
+    .action-btn.secondary {
+      background: #2196F3;
+      color: white;
+    }
+    
+    .action-btn.secondary:hover {
+      background: #1976D2;
+    }
+    
+    .action-btn.danger {
+      background: #f44336;
+      color: white;
+    }
+    
+    .action-btn.danger:hover {
+      background: #d32f2f;
+    }
+    
+    .save-btn {
+      background: #4CAF50;
+      color: white;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+    
+    .save-btn:hover {
+      background: #45a049;
+    }
+    
+    .reset-btn {
+      background: #9E9E9E;
+      color: white;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    
+    .reset-btn:hover {
+      background: #757575;
+    }
+    
+    /* 状态提示 */
+    .status-message {
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 10px;
+      display: none;
+    }
+    
+    .status-message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .status-message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    
+    /* 数据统计样式 */
+    #dataStats {
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      border-left: 4px solid #007bff;
+    }
+  </style>
+</head>
 <body>
-  <h2>插件设置</h2>
+  <h2>TaskMaster 设置</h2>
+  
+  <!-- 安全设置 -->
   <div class="setting-item">
-    <label>加密密钥：<input type="password" id="encryptionKey"></label>
-    <button id="saveSettings">保存</button>
+    <h3>🔒 安全设置</h3>
+    <div class="setting-group">
+      <label>
+        <input type="checkbox" id="enableEncryption"> 启用数据加密
+        <span class="setting-description">加密存储所有任务数据，提高数据安全性</span>
+      </label>
+      <div id="encryptionOptions" style="margin-top: 10px; display: none;">
+        <label>
+          加密密钥：
+          <input type="password" id="encryptionKey" placeholder="请输入至少8位密钥">
+        </label>
+        <p class="warning-text">⚠️ 请妥善保管密钥，忘记密钥将无法恢复数据</p>
+      </div>
+    </div>
   </div>
+
+  <!-- 显示设置 -->
+  <div class="setting-item">
+    <h3>🎨 显示设置</h3>
+    <div class="setting-group">
+      <label>
+        <input type="checkbox" id="showCompletedTasks" checked> 显示已完成任务
+        <span class="setting-description">在主界面显示已完成的任务</span>
+      </label>
+      <label>
+        <input type="checkbox" id="autoExpandToday" checked> 自动展开今日任务
+        <span class="setting-description">启动时自动展开今天的任务列表</span>
+      </label>
+      <label>
+        <input type="checkbox" id="showTaskStats" checked> 显示任务统计
+        <span class="setting-description">在搜索结果中显示任务统计信息</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- 行为设置 -->
+  <div class="setting-item">
+    <h3>⚙️ 行为设置</h3>
+    <div class="setting-group">
+      <label>
+        <input type="checkbox" id="confirmDelete" checked> 删除确认
+        <span class="setting-description">删除任务时显示确认对话框</span>
+      </label>
+      <label>
+        <input type="checkbox" id="autoSaveNotes" checked> 自动保存备注
+        <span class="setting-description">离开备注输入框时自动保存</span>
+      </label>
+      <label>
+        任务默认保存天数：
+        <select id="taskRetentionDays">
+          <option value="30">30天</option>
+          <option value="90" selected>90天</option>
+          <option value="180">180天</option>
+          <option value="365">365天</option>
+          <option value="0">永久保存</option>
+        </select>
+        <span class="setting-description">已完成任务的保存时间</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- 提醒设置 -->
+  <div class="setting-item">
+    <h3>🔔 提醒设置</h3>
+    <div class="setting-group">
+      <label>
+        <input type="checkbox" id="enableNotifications" checked> 启用通知提醒
+        <span class="setting-description">允许显示浏览器通知</span>
+      </label>
+      <label>
+        <input type="checkbox" id="soundNotifications"> 声音提醒
+        <span class="setting-description">播放提示音（需要浏览器支持）</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- 数据管理 -->
+  <div class="setting-item">
+    <h3>📊 数据管理</h3>
+    <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+      重要：更换浏览器或重装插件前，请先导出数据备份
+    </p>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      <button id="exportData" class="action-btn primary">
+        📤 导出任务数据
+      </button>
+      <button id="importData" class="action-btn secondary">
+        📥 导入任务数据
+      </button>
+      <button id="clearAllData" class="action-btn danger">
+        🗑️ 清空所有数据
+      </button>
+      <input type="file" id="importFile" accept=".json" style="display:none">
+    </div>
+    <div id="dataStats" style="margin-top: 15px; font-size: 13px; color: #666;"></div>
+  </div>
+
+  <!-- 保存按钮 -->
+  <div class="setting-item">
+    <button id="saveSettings" class="save-btn">💾 保存所有设置</button>
+    <button id="resetSettings" class="reset-btn">🔄 重置为默认设置</button>
+  </div>
+
   <script src="options.js"></script>
 </body>
 </html>
