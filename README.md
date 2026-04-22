@@ -11,6 +11,11 @@ TaskMaster 是一款基于现代极简设计美学构建的高级待办管理扩
 - 🔐 **银行级数据加密**：支持 AES-256 本地数据加密。
 - 🔍 **高效检索与多维过滤**：支持基于状态筛选，并能在搜索结果中高亮匹配关键词。
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/markdown777/TaskMaster/refs/heads/main/%E5%8A%9F%E8%83%BD%E6%BC%94%E7%A4%BA%E5%9B%BE%E7%89%87.png" alt="TaskMaster 功能演示" width="48%">
+  <img src="https://raw.githubusercontent.com/markdown777/TaskMaster/refs/heads/main/%E8%AE%BE%E7%BD%AE%E6%BC%94%E7%A4%BA%E5%9B%BE%E7%89%87.png" alt="TaskMaster 设置演示" width="48%">
+</p>
+
 ## 安装说明
 
 开发者本地安装：
