@@ -8,3 +8,5 @@ node_modules/
 taskmaster-backup-*.json
 tests/
 scripts/
+.cnb.yml
+edge-version/

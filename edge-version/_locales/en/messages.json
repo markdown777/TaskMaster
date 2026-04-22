@@ -1,8 +1,0 @@
-{
-  "extName": {
-    "message": "TaskMaster - Smart Task Manager"
-  },
-  "extDesc": {
-    "message": "A minimalist task manager with cross-device sync, local AES-256 encryption, and smart automated backups."
-  }
-}
