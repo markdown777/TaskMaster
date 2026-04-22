@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "TaskMaster",
-  "version": "2.9.0",
+  "version": "3.0.0",
   "description": "智能待办事项管理扩展",
   "permissions": [
     "storage",
     "alarms",
-    "notifications"
+    "notifications",
+    "downloads"
   ],
   "background": {
     "service_worker": "background.js"

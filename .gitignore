@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+*.zip
+*备份*/
+工作备份JSON/
+2026年4月备份（正常chrome和上架edge版本）/
+屏幕截图*.png
+taskmaster-backup-*.json
+tests/
+scripts/

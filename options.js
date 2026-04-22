@@ -19,29 +19,99 @@ const DEFAULT_SETTINGS = {
   soundNotifications: false
 };
 
-// 简单的加密/解密函数
-function simpleEncrypt(text, key) {
+// 导入加密/解密函数
+// 注意：由于options.js在不同环境中运行，这里保留本地实现作为备份
+async function encryptText(text, key) {
   if (!key || !text) return text;
-  let result = '';
-  for (let i = 0; i < text.length; i++) {
-    const charCode = text.charCodeAt(i) ^ key.charCodeAt(i % key.length);
-    result += String.fromCharCode(charCode);
+  
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    
+    // 派生密钥
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(key),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
+    );
+    
+    const cryptoKey = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: encoder.encode('taskmaster-salt'),
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt']
+    );
+    
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      cryptoKey,
+      data
+    );
+    
+    // 将iv和密文组合并编码
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(encrypted), iv.length);
+    
+    return btoa(String.fromCharCode(...combined));
+  } catch (error) {
+    console.error('加密失败:', error);
+    return text;
   }
-  return btoa(result); // Base64编码
 }
 
-function simpleDecrypt(encryptedText, key) {
+async function decryptText(encryptedText, key) {
   if (!key || !encryptedText) return encryptedText;
+  
   try {
-    const text = atob(encryptedText); // Base64解码
-    let result = '';
-    for (let i = 0; i < text.length; i++) {
-      const charCode = text.charCodeAt(i) ^ key.charCodeAt(i % key.length);
-      result += String.fromCharCode(charCode);
-    }
-    return result;
-  } catch (e) {
-    console.error('解密失败:', e);
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    
+    // 解码base64并分离iv和密文
+    const combined = new Uint8Array([...atob(encryptedText)].map(c => c.charCodeAt(0)));
+    const iv = combined.slice(0, 12);
+    const encrypted = combined.slice(12);
+    
+    // 派生密钥
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(key),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
+    );
+    
+    const cryptoKey = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: encoder.encode('taskmaster-salt'),
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt']
+    );
+    
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv },
+      cryptoKey,
+      encrypted
+    );
+    
+    return decoder.decode(decrypted);
+  } catch (error) {
+    console.error('解密失败:', error);
     return encryptedText;
   }
 }
@@ -67,19 +137,19 @@ function showMessage(text, type = 'success') {
 
 // 更新数据统计
 function updateDataStats() {
-  chrome.storage.sync.get(['tasks', 'settings'], (result) => {
-    const tasks = result.tasks || [];
+  chrome.storage.local.get(['tasks'], (localResult) => {
+    const tasks = localResult.tasks || [];
     const activeTasks = tasks.filter(t => !t.completed).length;
     const completedTasks = tasks.filter(t => t.completed).length;
     const tasksWithNotes = tasks.filter(t => t.notes && t.notes.trim()).length;
     
     const statsHtml = `
       <strong>数据统计：</strong><br>
-      📝 总任务数：${tasks.length}<br>
-      ✅ 已完成：${completedTasks}<br>
-      ⭐ 活动中：${activeTasks}<br>
-      📄 有备注：${tasksWithNotes}<br>
-      💾 存储大小：约 ${Math.round(JSON.stringify(tasks).length / 1024)} KB
+      总任务数：${tasks.length}<br>
+      已完成：${completedTasks}<br>
+      活动中：${activeTasks}<br>
+      有备注：${tasksWithNotes}<br>
+      存储大小：约 ${Math.round(JSON.stringify(tasks).length / 1024)} KB
     `;
     
     document.getElementById('dataStats').innerHTML = statsHtml;
@@ -143,7 +213,7 @@ function saveSettings() {
     return;
   }
   
-  chrome.storage.sync.set({ settings }, () => {
+  chrome.storage.sync.set({ settings }, async () => {
     if (chrome.runtime.lastError) {
       showMessage('设置保存失败：' + chrome.runtime.lastError.message, 'error');
     } else {
@@ -151,28 +221,47 @@ function saveSettings() {
       
       // 如果启用了加密，重新加密所有任务数据
       if (settings.enableEncryption && settings.encryptionKey) {
-        encryptAllTasks(settings.encryptionKey);
+        await encryptAllTasks(settings.encryptionKey);
       }
     }
   });
 }
 
 // 加密所有任务数据
-function encryptAllTasks(key) {
-  chrome.storage.sync.get(['tasks'], (result) => {
-    const tasks = result.tasks || [];
-    const encryptedTasks = tasks.map(task => ({
-      ...task,
-      text: simpleEncrypt(task.text, key),
-      notes: task.notes ? simpleEncrypt(task.notes, key) : task.notes
-    }));
-    
-    chrome.storage.sync.set({ tasks: encryptedTasks }, () => {
-      if (!chrome.runtime.lastError) {
-        showMessage('任务数据已加密');
-      }
+async function encryptAllTasks(key) {
+  try {
+    const tasks = await new Promise((resolve, reject) => {
+      chrome.storage.local.get(['tasks'], (result) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else {
+          resolve(result.tasks || []);
+        }
+      });
     });
-  });
+    
+    // 异步加密每个任务
+    const encryptedTasks = await Promise.all(tasks.map(async (task) => ({
+      ...task,
+      text: await encryptText(task.text, key),
+      notes: task.notes ? await encryptText(task.notes, key) : task.notes
+    })));
+    
+    await new Promise((resolve, reject) => {
+      chrome.storage.local.set({ tasks: encryptedTasks }, () => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else {
+          resolve();
+        }
+      });
+    });
+    
+    showMessage('任务数据已加密');
+  } catch (error) {
+    console.error('加密所有任务失败:', error);
+    showMessage('加密失败，请重试', 'error');
+  }
 }
 
 // 切换加密选项显示
@@ -197,44 +286,52 @@ function resetSettings() {
 
 // 数据导出功能
 function exportData() {
-  chrome.storage.sync.get(['tasks', 'settings'], (result) => {
-    const tasks = result.tasks || [];
-    const settings = result.settings || {};
-    
-    if (tasks.length === 0) {
-      showMessage('没有任务数据可导出', 'error');
-      return;
-    }
-    
-    // 如果数据已加密，先解密再导出
-    let exportTasks = [...tasks];
-    if (settings.enableEncryption && settings.encryptionKey) {
-      exportTasks = tasks.map(task => ({
-        ...task,
-        text: simpleDecrypt(task.text, settings.encryptionKey),
-        notes: task.notes ? simpleDecrypt(task.notes, settings.encryptionKey) : task.notes
-      }));
-    }
-    
-    const exportData = {
-      tasks: exportTasks,
-      exportDate: new Date().toISOString(),
-      version: '2.9.0'
-    };
-    
-    const dataStr = JSON.stringify(exportData, null, 2);
-    const blob = new Blob([dataStr], {type: 'application/json'});
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `taskmaster-backup-${new Date().toISOString().slice(0,10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    showMessage(`成功导出 ${tasks.length} 条任务`);
+  chrome.storage.sync.get(['settings'], (syncResult) => {
+    chrome.storage.local.get(['tasks'], async (localResult) => {
+      const tasks = localResult.tasks || [];
+      const settings = syncResult.settings || {};
+      
+      if (tasks.length === 0) {
+        showMessage('没有任务数据可导出', 'error');
+        return;
+      }
+      
+      // 如果数据已加密，先解密再导出
+      let exportTasks = [...tasks];
+      if (settings.enableEncryption && settings.encryptionKey) {
+        try {
+          exportTasks = await Promise.all(tasks.map(async task => ({
+            ...task,
+            text: await decryptText(task.text, settings.encryptionKey),
+            notes: task.notes ? await decryptText(task.notes, settings.encryptionKey) : task.notes
+          })));
+        } catch (error) {
+          console.error('解密导出数据失败:', error);
+          showMessage('解密导出数据失败', 'error');
+          return;
+        }
+      }
+      
+      const exportData = {
+        tasks: exportTasks,
+        exportDate: new Date().toISOString(),
+        version: '3.0.0'
+      };
+      
+      const dataStr = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([dataStr], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `taskmaster-backup-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showMessage(`成功导出 ${tasks.length} 条任务`);
+    });
   });
 }
 
@@ -270,19 +367,25 @@ function handleFileImport(event) {
       if (!isValid) throw new Error('数据格式错误：缺少必要字段');
       
       // 如果当前启用了加密，对导入的数据进行加密
-      chrome.storage.sync.get(['settings'], (result) => {
+      chrome.storage.sync.get(['settings'], async (result) => {
         const settings = result.settings || {};
         let finalTasks = [...tasks];
         
         if (settings.enableEncryption && settings.encryptionKey) {
-          finalTasks = tasks.map(task => ({
-            ...task,
-            text: simpleEncrypt(task.text, settings.encryptionKey),
-            notes: task.notes ? simpleEncrypt(task.notes, settings.encryptionKey) : task.notes
-          }));
+          try {
+            finalTasks = await Promise.all(tasks.map(async task => ({
+              ...task,
+              text: await encryptText(task.text, settings.encryptionKey),
+              notes: task.notes ? await encryptText(task.notes, settings.encryptionKey) : task.notes
+            })));
+          } catch (error) {
+            console.error('加密导入数据失败:', error);
+            showMessage('加密导入数据失败', 'error');
+            return;
+          }
         }
         
-        chrome.storage.sync.set({tasks: finalTasks}, () => {
+        chrome.storage.local.set({tasks: finalTasks}, () => {
           if (chrome.runtime.lastError) {
             showMessage(`导入失败: ${chrome.runtime.lastError.message}`, 'error');
           } else {
@@ -303,8 +406,8 @@ function handleFileImport(event) {
 
 // 清空所有数据
 function clearAllData() {
-  if (confirm('⚠️ 警告：此操作将删除所有任务数据，无法撤销！\n\n确定要继续吗？')) {
-    chrome.storage.sync.set({tasks: []}, () => {
+  if (confirm('警告：此操作将删除所有任务数据，无法撤销！\n\n确定要继续吗？')) {
+    chrome.storage.local.set({tasks: []}, () => {
       if (chrome.runtime.lastError) {
         showMessage('清空失败：' + chrome.runtime.lastError.message, 'error');
       } else {
@@ -314,6 +417,53 @@ function clearAllData() {
     });
   }
 }
+
+// 导出所有的本地备份文件（将local存的备份列出来）
+function showBackupList() {
+  chrome.storage.local.get(null, (allData) => {
+    const backupKeys = Object.keys(allData)
+      .filter(key => key.startsWith(typeof STORAGE_KEYS !== 'undefined' ? STORAGE_KEYS.BACKUP_PREFIX : 'backup_data_'))
+      .sort().reverse(); // 最新的在最上面
+      
+    if (backupKeys.length === 0) {
+      showMessage('没有找到自动备份的数据', 'error');
+      return;
+    }
+    
+    let html = `<strong>发现 ${backupKeys.length} 份自动备份：</strong><br><br>`;
+    backupKeys.forEach(key => {
+      const backupTime = allData[key].backupTime ? new Date(allData[key].backupTime).toLocaleString() : '未知时间';
+      const tasksCount = allData[key].data ? allData[key].data.length : 0;
+      html += `<div style="margin-bottom:8px; padding:8px; border:1px solid #ddd; border-radius:4px; background:#fff;">
+                 <span style="font-weight:bold;">${key.replace(typeof STORAGE_KEYS !== 'undefined' ? STORAGE_KEYS.BACKUP_PREFIX : 'backup_data_', '')}</span> 
+                 <span style="color:#666; font-size:12px;">(${tasksCount} 个任务, ${backupTime})</span>
+                 <button onclick="restoreFromBackupKey('${key}')" style="margin-left:10px; padding:2px 8px; cursor:pointer;">恢复此备份</button>
+               </div>`;
+    });
+    
+    const statsDiv = document.getElementById('dataStats');
+    statsDiv.innerHTML = html;
+  });
+}
+
+// 暴露到全局供内联 onclick 调用
+window.restoreFromBackupKey = function(key) {
+  if (confirm(`确定要使用 ${key} 的数据覆盖当前任务吗？`)) {
+    chrome.storage.local.get(key, (result) => {
+      const backupData = result[key];
+      if (backupData && backupData.data) {
+        chrome.storage.local.set({ tasks: backupData.data }, () => {
+          if (!chrome.runtime.lastError) {
+            showMessage('数据已成功恢复！');
+            updateDataStats();
+          } else {
+            showMessage('恢复失败：' + chrome.runtime.lastError.message, 'error');
+          }
+        });
+      }
+    });
+  }
+};
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
@@ -332,6 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('importData').addEventListener('click', importData);
   document.getElementById('importFile').addEventListener('change', handleFileImport);
   document.getElementById('clearAllData').addEventListener('click', clearAllData);
+  document.getElementById('showBackupsBtn')?.addEventListener('click', showBackupList);
   
   // 定期更新数据统计
   setInterval(updateDataStats, 30000); // 每30秒更新一次
