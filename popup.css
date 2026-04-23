@@ -623,37 +623,148 @@ button[type='submit']:hover {
   border-radius: 4px;
 }
 
-.modal {
+/* =========================================
+   AI 解锁模态框 (TaskMaster v3.0.0 设计语言)
+   ========================================= */
+
+/* 1. 明亮通透的毛玻璃遮罩层 */
+#pin-modal.modal {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5);
+  background-color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  animation: fadeIn 0.3s var(--ease-out-expo);
 }
-.modal[hidden] {
+
+#pin-modal.modal[hidden] {
   display: none;
 }
-.modal-content {
-  background: var(--bg-primary);
-  padding: 20px;
-  border-radius: 8px;
-  width: 280px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-.modal-content h3 { margin-top: 0; margin-bottom: 8px; }
-.modal-content p { font-size: 12px; color: var(--text-secondary); margin-bottom: 16px; }
-.modal-actions {
+
+/* 2. 容器：大留白、直角、弥散阴影 */
+#pin-modal .modal-content {
+  background: var(--bg-primary);
+  padding: 40px;
+  width: 320px;
+  border: 1px solid var(--border-light);
+  border-radius: 0; /* 舍弃圆角，保持几何切割感 */
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.05);
+  animation: slideUpModal 0.4s var(--ease-out-expo);
+  box-sizing: border-box;
+}
+
+@keyframes slideUpModal {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 3. 字重驱动的排版 */
+#pin-modal .modal-content h3 { 
+  margin: 0 0 12px 0; 
+  font-size: 18px; 
+  font-weight: 800; /* 极致字重对比 */
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+}
+
+#pin-modal .modal-content p { 
+  font-size: 12px; 
+  color: var(--text-secondary); 
+  margin: 0 0 32px 0; 
+  line-height: 1.6;
+}
+
+/* 4. 无边框等宽输入框 (专门针对 PIN 码优化) */
+#pin-modal #pin-input {
+  width: 100%;
+  padding: 12px 0;
+  border: none;
+  border-bottom: 2px solid var(--border-light);
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 24px;
+  letter-spacing: 12px; /* 拉大字符间距，增强密码输入质感 */
+  text-align: center;
+  color: var(--text-primary);
+  transition: border-color 0.4s var(--ease-out-expo);
+  box-sizing: border-box;
+}
+
+#pin-modal #pin-input:focus {
+  outline: none;
+  border-bottom-color: var(--brand-color);
+}
+
+#pin-modal #pin-input::placeholder {
+  color: #E0E0E0;
+  font-weight: 300;
+  letter-spacing: 12px;
+}
+
+/* 5. 错误提示：占位防抖动 */
+#pin-modal .error-text {
+  color: #ff4444; /* 唯一警示色 */
+  font-size: 12px;
+  margin: 12px 0 0 0;
+  text-align: center;
+  min-height: 18px; /* 占位符，避免出现/消失时引起弹窗高度跳动 */
+  transition: opacity 0.2s ease;
+}
+
+#pin-modal .error-text[hidden] {
+  visibility: hidden;
+  display: block !important; /* 强制占位 */
+  opacity: 0;
+}
+
+/* 6. 按钮与阻尼微动效 */
+#pin-modal .modal-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
+  gap: 16px;
+  margin-top: 32px;
 }
-.error-text {
-  color: #e74c3c;
-  font-size: 12px;
-  margin-top: 8px;
+
+#pin-modal .primary-btn, 
+#pin-modal .secondary-btn {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 0; /* 直角按钮 */
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  transition: transform 0.2s var(--ease-out-expo), opacity 0.2s ease, color 0.2s ease;
 }
-.primary-btn { background: var(--brand-color); color: var(--bg-primary); border: none; padding: 6px 12px; cursor: pointer; }
-.secondary-btn { background: transparent; border: 1px solid var(--border-light); padding: 6px 12px; cursor: pointer; }
+
+#pin-modal .primary-btn { 
+  background: var(--brand-color); 
+  color: var(--bg-primary); 
+}
+
+#pin-modal .secondary-btn { 
+  background: transparent; 
+  color: var(--text-secondary); 
+}
+
+#pin-modal .secondary-btn:hover {
+  color: var(--text-primary);
+}
+
+#pin-modal .primary-btn:hover,
+#pin-modal .secondary-btn:hover {
+  transform: scale(0.98); /* 阻尼按压动效 */
+}
+
+#pin-modal .primary-btn:active,
+#pin-modal .secondary-btn:active {
+  transform: scale(0.95);
+}
