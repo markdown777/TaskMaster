@@ -7,6 +7,13 @@
 </head>
 <body>
   <div class="container">
+    <div class="header">
+      <h1>TaskMaster</h1>
+      <div class="header-actions">
+        <button id="ai-toggle-btn" class="icon-btn" title="✨ AI 智能录入">✨</button>
+        <!-- 原有的设置按钮在底部，这里仅按照计划添加 -->
+      </div>
+    </div>
     <div class="task-form-container">
       <form id="taskForm">
         <input type="text" id="new-task" placeholder="添加新任务..." autocomplete="off">
@@ -68,8 +75,26 @@
   </div>
   <script src="constants.js"></script>
   <script src="utils.js"></script>
+  <script src="adapters/storage.js"></script>
+  <script src="adapters/crypto.js"></script>
+  <script src="adapters/network.js"></script>
+  <script src="services/ai.js"></script>
   <script src="taskManager.js"></script>
   <script src="shareManager.js"></script>
   <script src="popup.js"></script>
+
+  <!-- PIN Prompt Modal -->
+  <div id="pin-modal" class="modal" hidden>
+    <div class="modal-content">
+      <h3>解锁 AI 助理</h3>
+      <p>请输入您在设置中配置的 4 位安全 PIN 码以解密 API Key。</p>
+      <input type="password" id="pin-input" class="form-control" maxlength="4" placeholder="****">
+      <div class="modal-actions">
+        <button id="pin-cancel-btn" class="secondary-btn">取消</button>
+        <button id="pin-submit-btn" class="primary-btn">解锁</button>
+      </div>
+      <p id="pin-error" class="error-text" hidden>PIN码错误或解密失败</p>
+    </div>
+  </div>
 </body>
 </html>
