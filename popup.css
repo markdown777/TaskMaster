@@ -624,6 +624,61 @@ button[type='submit']:hover {
 }
 
 /* =========================================
+   AI 按钮引导动画与 Tooltip
+   ========================================= */
+@keyframes aiBreathe {
+  0% { box-shadow: 0 0 0 0 rgba(17, 17, 17, 0.2); transform: scale(1); }
+  50% { box-shadow: 0 0 0 6px rgba(17, 17, 17, 0); transform: scale(1.1); }
+  100% { box-shadow: 0 0 0 0 rgba(17, 17, 17, 0); transform: scale(1); }
+}
+
+#ai-toggle-btn.guide-glow {
+  animation: aiBreathe 2s infinite;
+  border-radius: 4px;
+  position: relative;
+}
+
+/* 首次使用 Tooltip 提示文字 */
+#ai-toggle-btn.guide-glow::after {
+  content: '首次使用请点击';
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 10px;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--brand-color);
+  color: var(--bg-primary);
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  animation: fadeInOut 4s infinite;
+  z-index: 10;
+}
+
+/* Tooltip 的小三角形 */
+#ai-toggle-btn.guide-glow::before {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 8px;
+  margin-top: 4px;
+  border-width: 0 4px 6px 4px;
+  border-style: solid;
+  border-color: transparent transparent var(--brand-color) transparent;
+  pointer-events: none;
+  opacity: 0;
+  animation: fadeInOut 4s infinite;
+  z-index: 10;
+}
+
+@keyframes fadeInOut {
+  0%, 100% { opacity: 0; transform: translateY(-4px); }
+  10%, 90% { opacity: 1; transform: translateY(0); }
+}
+
+/* =========================================
    AI 解锁模态框 (TaskMaster v3.0.0 设计语言)
    ========================================= */
 

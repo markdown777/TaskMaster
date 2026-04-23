@@ -52,9 +52,23 @@ document.addEventListener('DOMContentLoaded', () => {
   let isAiMode = false;
   let pendingAiText = "";
 
-  aiToggleBtn?.addEventListener('click', () => {
+  // 1. 初始化 AI 按钮首次引导状态
+  window.storageAdapter.get('AI_GUIDE_SEEN').then(isAIGuideSeen => {
+    if (!isAIGuideSeen && aiToggleBtn) {
+      aiToggleBtn.classList.add('guide-glow');
+    }
+  });
+
+  aiToggleBtn.addEventListener('click', () => {
     isAiMode = !isAiMode;
     aiToggleBtn.classList.toggle('active', isAiMode);
+    
+    // 点击后永久移除引导效果并记录到本地
+    if (aiToggleBtn.classList.contains('guide-glow')) {
+      aiToggleBtn.classList.remove('guide-glow');
+      window.storageAdapter.set('AI_GUIDE_SEEN', true);
+    }
+
     taskInput.placeholder = isAiMode ? "✨ AI 模式: 输入自然语言 (如: 明天下午3点开会)" : "添加新任务...";
   });
 
@@ -146,17 +160,34 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       
       if (parsedTask.due_date) {
-        // Format to local datetime-local string format: YYYY-MM-DDTHH:mm
-        const dateObj = new Date(parsedTask.due_date);
-        if (!isNaN(dateObj.getTime())) {
-          const tzOffset = (new Date()).getTimezoneOffset() * 60000;
-          const localISOTime = (new Date(dateObj - tzOffset)).toISOString().slice(0,16);
-          document.getElementById('task-due').value = localISOTime;
-          // Update due button visual
+        // Format cleaning: replace slashes with dashes, spaces with 'T'
+        let dateStr = parsedTask.due_date.replace(/\//g, '-').replace(' ', 'T');
+        if (dateStr.length > 16) {
+          dateStr = dateStr.slice(0, 16); // Extract up to minutes (YYYY-MM-DDTHH:mm)
+        }
+
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateStr)) {
+          document.getElementById('task-due').value = dateStr;
           const dueButton = document.getElementById('due-button');
-          dueButton.textContent = '已设时间';
-          dueButton.style.background = 'var(--brand-color)';
-          dueButton.style.color = 'var(--bg-primary)';
+          if (dueButton) {
+            dueButton.textContent = '已设时间';
+            dueButton.style.background = 'var(--brand-color)';
+            dueButton.style.color = 'var(--bg-primary)';
+          }
+        } else {
+          // Fallback: If LLM returns an unstandardized format, parse using Date and compensate for local timezone
+          const dateObj = new Date(dateStr);
+          if (!isNaN(dateObj.getTime())) {
+            const tzOffset = dateObj.getTimezoneOffset() * 60000;
+            const localISOTime = (new Date(dateObj - tzOffset)).toISOString().slice(0, 16);
+            document.getElementById('task-due').value = localISOTime;
+            const dueButton = document.getElementById('due-button');
+            if (dueButton) {
+              dueButton.textContent = '已设时间';
+              dueButton.style.background = 'var(--brand-color)';
+              dueButton.style.color = 'var(--bg-primary)';
+            }
+          }
         }
       }
       
