@@ -184,12 +184,14 @@ async function loadSettings() {
     updateDataStats();
   });
 
-  const aiConfig = await window.storageAdapter.get('AI_CONFIG') || { provider: 'deepseek', baseUrl: '' };
+  const aiConfig = await window.storageAdapter.get('AI_CONFIG') || { provider: 'deepseek', baseUrl: '', enableEncryption: false };
   document.getElementById('aiProvider').value = aiConfig.provider || 'deepseek';
   document.getElementById('aiBaseUrl').value = aiConfig.baseUrl || '';
+  document.getElementById('aiEnableEncryption').checked = aiConfig.enableEncryption || false;
+  document.getElementById('aiPinCodeGroup').style.display = aiConfig.enableEncryption ? 'flex' : 'none';
   
   if (aiConfig.hasKey) {
-    document.getElementById('aiApiKey').placeholder = '已配置 (已加密，请重新输入更新)';
+    document.getElementById('aiApiKey').placeholder = aiConfig.enableEncryption ? '已配置 (已加密，请重新输入更新)' : '已配置 (未加密，请重新输入更新)';
   }
 
   toggleAiProvider();
@@ -200,33 +202,49 @@ async function saveSettings() {
   const provider = document.getElementById('aiProvider').value;
   const baseUrl = document.getElementById('aiBaseUrl').value;
   const apiKey = document.getElementById('aiApiKey').value;
+  const enableEncryption = document.getElementById('aiEnableEncryption').checked;
   const pinCode = document.getElementById('aiPinCode').value;
 
-  const aiConfig = {
-    provider: provider,
-    baseUrl: baseUrl
-  };
+  const aiConfig = await window.storageAdapter.get('AI_CONFIG') || {};
+  aiConfig.provider = provider;
+  aiConfig.baseUrl = baseUrl;
+  aiConfig.enableEncryption = enableEncryption;
 
-  // Encrypt and save API key if provided
-  if (apiKey && pinCode) {
-    if (pinCode.length < 4) {
-      showMessage('PIN 码必须至少4位', 'error');
-      return;
-    }
-    try {
-      const encryptedKey = await window.cryptoAdapter.encrypt(apiKey, pinCode);
-      await window.storageAdapter.set('AI_ENCRYPTED_KEY', encryptedKey);
-      
-      // We also store a flag indicating a key is configured
+  // 如果提供了新的 API Key
+  if (apiKey) {
+    if (enableEncryption) {
+      if (pinCode.length < 4) {
+        showMessage('启用加密时，PIN 码必须至少4位', 'error');
+        return;
+      }
+      try {
+        // 使用 options.js 本地提供的 encryptText 确保加密成功
+        const encryptedKey = await encryptText(apiKey, pinCode);
+        if (!encryptedKey || encryptedKey === apiKey) {
+          throw new Error('加密失败，返回了明文');
+        }
+        await window.storageAdapter.set('AI_ENCRYPTED_KEY', encryptedKey);
+        await window.storageAdapter.remove('AI_PLAINTEXT_KEY'); // 确保清除明文
+        aiConfig.hasKey = true;
+      } catch (e) {
+        console.error("Encryption failed", e);
+        showMessage('加密 API Key 失败，请重试。', 'error');
+        return;
+      }
+    } else {
+      // 不加密明文存储
+      await window.storageAdapter.set('AI_PLAINTEXT_KEY', apiKey);
+      await window.storageAdapter.remove('AI_ENCRYPTED_KEY'); // 确保清除密文
       aiConfig.hasKey = true;
-    } catch (e) {
-      console.error("Encryption failed", e);
-      showMessage('加密 API Key 失败，请重试。', 'error');
-      return;
     }
-  } else if (apiKey && !pinCode) {
-    showMessage('请输入 PIN 码以加密 API Key', 'error');
+  } else if (enableEncryption && pinCode) {
+    // 仅修改了PIN码，需要重新加密现有的明文或旧密文
+    // 逻辑较复杂，这里简化处理：要求用户重新输入Key
+    showMessage('更改加密状态或PIN码需要重新输入 API Key', 'error');
     return;
+  } else if (enableEncryption && !pinCode && aiConfig.hasKey) {
+     showMessage('已启用加密，请输入 PIN 码及 API Key 以完成设置', 'error');
+     return;
   }
 
   await window.storageAdapter.set('AI_CONFIG', aiConfig);
@@ -258,7 +276,7 @@ async function saveSettings() {
   }
   
   chrome.storage.sync.set({ settings }, async () => {
-    if (chrome.runtime.lastError) {
+    if (chrome.runtime && chrome.runtime.lastError) {
       showMessage('设置保存失败：' + chrome.runtime.lastError.message, 'error');
     } else {
       showMessage('设置保存成功！');
@@ -282,7 +300,7 @@ async function encryptAllTasks(key) {
   try {
     const tasks = await new Promise((resolve, reject) => {
       chrome.storage.local.get(['tasks'], (result) => {
-        if (chrome.runtime.lastError) {
+        if (chrome.runtime && chrome.runtime.lastError) {
           reject(chrome.runtime.lastError);
         } else {
           resolve(result.tasks || []);
@@ -299,7 +317,7 @@ async function encryptAllTasks(key) {
     
     await new Promise((resolve, reject) => {
       chrome.storage.local.set({ tasks: encryptedTasks }, () => {
-        if (chrome.runtime.lastError) {
+        if (chrome.runtime && chrome.runtime.lastError) {
           reject(chrome.runtime.lastError);
         } else {
           resolve();
@@ -335,11 +353,26 @@ function toggleAiProvider() {
   }
 }
 
+// 切换加密 PIN 码显示
+function toggleAiEncryption() {
+  const enableEncryption = document.getElementById('aiEnableEncryption').checked;
+  const pinCodeGroup = document.getElementById('aiPinCodeGroup');
+  
+  if (enableEncryption) {
+    pinCodeGroup.style.display = 'flex';
+    document.getElementById('aiApiKey').placeholder = '输入您的 API Key';
+  } else {
+    pinCodeGroup.style.display = 'none';
+    document.getElementById('aiPinCode').value = ''; // 清除输入的 PIN 码
+    document.getElementById('aiApiKey').placeholder = '输入您的 API Key (明文存储)';
+  }
+}
+
 // 重置设置
 function resetSettings() {
   if (confirm('确定要重置所有设置为默认值吗？此操作无法撤销。')) {
     chrome.storage.sync.set({ settings: DEFAULT_SETTINGS }, () => {
-      if (chrome.runtime.lastError) {
+      if (chrome.runtime && chrome.runtime.lastError) {
         showMessage('重置失败：' + chrome.runtime.lastError.message, 'error');
       } else {
         loadSettings();
@@ -451,7 +484,7 @@ function handleFileImport(event) {
         }
         
         chrome.storage.local.set({tasks: finalTasks}, () => {
-          if (chrome.runtime.lastError) {
+          if (chrome.runtime && chrome.runtime.lastError) {
             showMessage(`导入失败: ${chrome.runtime.lastError.message}`, 'error');
           } else {
             showMessage(`成功导入 ${tasks.length} 条任务`);
@@ -473,7 +506,7 @@ function handleFileImport(event) {
 function clearAllData() {
   if (confirm('警告：此操作将删除所有任务数据，无法撤销！\n\n确定要继续吗？')) {
     chrome.storage.local.set({tasks: []}, () => {
-      if (chrome.runtime.lastError) {
+      if (chrome.runtime && chrome.runtime.lastError) {
         showMessage('清空失败：' + chrome.runtime.lastError.message, 'error');
       } else {
         showMessage('所有数据已清空');
@@ -518,11 +551,11 @@ window.restoreFromBackupKey = function(key) {
       const backupData = result[key];
       if (backupData && backupData.data) {
         chrome.storage.local.set({ tasks: backupData.data }, () => {
-          if (!chrome.runtime.lastError) {
+          if (chrome.runtime && chrome.runtime.lastError) {
+            showMessage('恢复失败：' + chrome.runtime.lastError.message, 'error');
+          } else {
             showMessage('数据已成功恢复！');
             updateDataStats();
-          } else {
-            showMessage('恢复失败：' + chrome.runtime.lastError.message, 'error');
           }
         });
       }
@@ -542,6 +575,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // AI 助理配置选项切换
   document.getElementById('aiProvider').addEventListener('change', toggleAiProvider);
+  document.getElementById('aiEnableEncryption').addEventListener('change', toggleAiEncryption);
   
   // 事件监听器
   document.getElementById('saveSettings').addEventListener('click', saveSettings);

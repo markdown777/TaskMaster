@@ -19,7 +19,7 @@ class TaskManager {
     return new Promise((resolve, reject) => {
       // 优先从 local 存储读取，如果 local 中没有数据，尝试从 sync 迁移
       chrome.storage.local.get({ tasks: null }, (localResult) => {
-        if (chrome.runtime.lastError) {
+        if (chrome.runtime && chrome.runtime.lastError) {
           console.error('加载本地任务失败:', chrome.runtime.lastError);
           return reject(chrome.runtime.lastError);
         }
@@ -31,7 +31,7 @@ class TaskManager {
 
         // 如果 local 没有数据，尝试从旧的 sync读取并迁移
         chrome.storage.sync.get({ tasks: [], settings: {} }, (syncResult) => {
-          if (chrome.runtime.lastError) {
+          if (chrome.runtime && chrome.runtime.lastError) {
             console.error('从同步存储加载任务失败:', chrome.runtime.lastError);
             return reject(chrome.runtime.lastError);
           }
@@ -66,7 +66,7 @@ class TaskManager {
   async saveTasks(tasks) {
     return new Promise((resolve, reject) => {
       chrome.storage.local.set({ tasks }, () => {
-        if (chrome.runtime.lastError) {
+        if (chrome.runtime && chrome.runtime.lastError) {
           console.error('保存任务失败:', chrome.runtime.lastError);
           reject(chrome.runtime.lastError);
         } else {
@@ -99,7 +99,7 @@ class TaskManager {
       
       const syncKey = typeof STORAGE_KEYS !== 'undefined' ? STORAGE_KEYS.SYNC_CORE_TASKS : 'sync_core_tasks';
       chrome.storage.sync.set({ [syncKey]: coreTasks }, () => {
-        if (chrome.runtime.lastError) {
+        if (chrome.runtime && chrome.runtime.lastError) {
           console.warn('[DEBUG] 同步核心数据到云端受限:', chrome.runtime.lastError);
         } else {
           console.log('[DEBUG] 核心数据已同步到云端');

@@ -18,11 +18,29 @@ body {
   -webkit-font-smoothing: antialiased;
   margin: 0;
   line-height: 1.6;
+  width: 440px;
+  height: 600px; /* Chrome extension popup maximum height */
+  overflow: hidden;
 }
 
 .container {
-  width: 440px;
-  padding: 32px 24px;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 8px; /* space for scrollbar */
+  margin-right: -8px;
+  margin-bottom: 16px; /* 为底部 footer 留出空隙 */
 }
 
 /* 时间与标签的等宽字体 */
@@ -32,12 +50,26 @@ body {
   letter-spacing: -0.5px;
 }
 
-/* 搜索功能样式重构 */
-.search-container {
-  margin: 24px 0;
-  padding: 0;
-  background: transparent;
-  border: none;
+/* 搜索弹出层样式 */
+.search-popover {
+  position: absolute;
+  top: 64px; /* header 下方 */
+  right: 24px;
+  width: 320px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  animation: popoverFadeIn 0.2s var(--ease-out-expo) forwards;
+}
+
+.search-popover[hidden] {
+  display: none !important;
+}
+
+.search-popover-inner {
+  padding: 16px;
 }
 
 .search-box {
@@ -139,8 +171,19 @@ body {
 }
 
 #new-task::placeholder {
-  color: #CCCCCC;
-  font-weight: 300;
+  color: #999999;
+  font-weight: 400;
+  transition: font-size 0.3s ease, color 0.3s ease;
+}
+
+/* AI模式下的输入框样式及占位符字号调整 */
+#new-task.ai-mode {
+  color: var(--brand-color);
+}
+#new-task.ai-mode::placeholder {
+  color: #888888;
+  font-size: 16px; /* 缩小占位符字号以便看全 */
+  line-height: 1.5;
 }
 
 .task-options {
@@ -308,10 +351,21 @@ button[type='submit']:hover {
 }
 
 /* 任务列表样式重构 */
-.task-list {
-  padding: 0;
-  margin: 0;
-  list-style: none;
+/* .task-list 已在上方定义 */
+
+/* Custom Scrollbar for task-list */
+.task-list::-webkit-scrollbar {
+  width: 4px;
+}
+.task-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.task-list::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 4px;
+}
+.task-list::-webkit-scrollbar-thumb:hover {
+  background: #ccc;
 }
 
 .task-item {
@@ -321,6 +375,56 @@ button[type='submit']:hover {
   padding: 20px 0;
   border-bottom: 1px solid var(--border-light);
   animation: slideUp 0.5s var(--ease-out-expo) forwards;
+}
+
+/* 最后一个任务项不显示底部分割线 */
+.task-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+/* 归档区域两列网格布局 */
+.archive-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  box-sizing: border-box;
+}
+
+.archive-grid .task-item {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  animation: slideUp 0.5s var(--ease-out-expo) forwards;
+  /* 覆盖原来基于底部边框的列表样式 */
+  border-bottom: none !important;
+  margin-bottom: 0;
+  box-sizing: border-box;
+  overflow: hidden; /* 防止内部内容撑破网格 */
+}
+
+.archive-grid .task-item .archived-task {
+  width: 100%;
+}
+
+.archive-grid .task-item .archived-title {
+  font-size: 13px;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.archive-grid .task-item .action-buttons {
+  margin-top: auto;
+  align-self: flex-end;
+  padding-top: 8px;
 }
 
 @keyframes slideUp {
@@ -425,16 +529,26 @@ button[type='submit']:hover {
   margin-right: 12px;
 }
 
-/* 备注信息 */
-.task-notes {
-  font-size: 13px;
+/* 备注信息指示器 */
+.task-notes-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
   color: var(--text-secondary);
   margin-top: 8px;
-  line-height: 1.5;
+  padding: 4px 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  user-select: none;
 }
 
-.task-notes-label {
-  display: none;
+.task-notes-indicator:hover {
+  background-color: var(--border-light);
+  color: var(--text-primary);
 }
 
 /* 操作按钮 */
@@ -462,17 +576,24 @@ button[type='submit']:hover {
   color: #ff4444; /* 删除保留唯一的警示色 */
 }
 
-/* 分组与日期头部 */
-.date-section, .archive-section, .search-section {
-  margin: 32px 0 16px;
+/* 任务列表容器重置自带内外边距 */
+ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
 }
 
-.date-header, .archive-title, .search-section-title {
+/* 分组与日期头部 */
+.date-section, .archive-section, .search-section, .pinned-section {
+  margin: 0 0 32px 0;
+}
+
+.date-header, .archive-title, .search-section-title, .section-title {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.2px;
   color: var(--text-secondary);
-  margin-bottom: 16px;
+  margin-bottom: 0; /* 修改：由 task-item 的 padding 撑开间距 */
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -487,8 +608,8 @@ button[type='submit']:hover {
 
 /* 底部操作栏 */
 .action-footer {
-  margin-top: 48px;
-  padding-top: 24px;
+  margin-top: auto;
+  padding-top: 16px;
   border-top: 1px solid var(--border-light);
   display: flex;
   justify-content: space-between;
@@ -588,6 +709,10 @@ button[type='submit']:hover {
   transform: scale(0.98);
 }
 
+.header, .task-form-container, .search-container, .action-footer {
+  flex-shrink: 0;
+}
+
 /* AI Button & Modal Styles */
 .header {
   display: flex;
@@ -606,21 +731,26 @@ button[type='submit']:hover {
   gap: 8px;
 }
 
-#ai-toggle-btn {
+#ai-toggle-btn, #search-toggle-btn {
   background: none;
   border: none;
   cursor: pointer;
   font-size: 16px;
   padding: 4px;
-  transition: transform 0.2s;
+  transition: transform 0.2s, background-color 0.2s, color 0.2s;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
 }
-#ai-toggle-btn:hover {
+#ai-toggle-btn:hover, #search-toggle-btn:hover {
   transform: scale(1.1);
 }
 
-#ai-toggle-btn.active {
+#ai-toggle-btn.active, #search-toggle-btn.active {
   background: var(--brand-color);
-  border-radius: 4px;
+  color: var(--bg-primary);
 }
 
 /* =========================================
@@ -679,8 +809,85 @@ button[type='submit']:hover {
 }
 
 /* =========================================
-   AI 解锁模态框 (TaskMaster v3.0.0 设计语言)
+   分享模态框 (TaskMaster v3.0.0 设计语言)
    ========================================= */
+.share-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.3s var(--ease-out-expo);
+}
+
+.share-modal-content {
+  background: var(--bg-primary);
+  padding: 32px;
+  width: 320px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.05);
+  animation: slideUpModal 0.4s var(--ease-out-expo);
+  box-sizing: border-box;
+}
+
+.share-modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 24px 0;
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+}
+
+.share-options-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.share-btn-item {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out-expo);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.share-btn-item:hover {
+  background: var(--brand-color);
+  color: var(--bg-primary);
+  border-color: var(--brand-color);
+  transform: translateY(-2px);
+}
+
+.share-btn-cancel {
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s;
+  margin-top: 8px;
+}
+
+.share-btn-cancel:hover {
+  color: var(--text-primary);
+}
 
 /* 1. 明亮通透的毛玻璃遮罩层 */
 #pin-modal.modal {

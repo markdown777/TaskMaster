@@ -12,54 +12,43 @@ class ShareManager {
    */
   showShareMenu(content) {
     // 移除已存在的菜单
-    const existingMenu = document.getElementById('share-menu');
+    const existingMenu = document.getElementById('share-modal');
     if (existingMenu) {
       existingMenu.remove();
     }
     
-    // 创建分享菜单
-    const menu = document.createElement('div');
-    menu.id = 'share-menu';
-    menu.style.cssText = `
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: white;
-      border: 1px solid #ccc;
-      border-radius: 0;
-      padding: 20px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-      z-index: 1000;
-      min-width: 280px;
-      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-      animation: fadeIn 0.3s ease-in-out;
-    `;
+    // 创建分享菜单容器 (使用最新的 TaskMaster v3.0.0 规范)
+    const modal = document.createElement('div');
+    modal.id = 'share-modal';
+    modal.className = 'share-modal';
     
-    menu.innerHTML = `
-      <h3 style="margin: 0 0 15px 0; color: #333;">选择分享方式</h3>
-      <div style="display: flex; flex-direction: column; gap: 10px;">
-        <button id="copy-share" style="padding: 10px; border: 1px solid #4CAF50; background: #4CAF50; color: white; border-radius: 0; cursor: pointer; transition: background-color 0.3s;">
-          复制到剪贴板
-        </button>
-        <button id="email-share" style="padding: 10px; border: 1px solid #2196F3; background: #2196F3; color: white; border-radius: 0; cursor: pointer; transition: background-color 0.3s;">
-          邮件分享
-        </button>
-        <button id="web-share" style="padding: 10px; border: 1px solid #FF9800; background: #FF9800; color: white; border-radius: 0; cursor: pointer; display: none; transition: background-color 0.3s;" data-supported="false">
-          系统分享
-        </button>
-        <button id="close-menu" style="padding: 8px; border: 1px solid #ccc; background: #f5f5f5; color: #666; border-radius: 0; cursor: pointer; transition: background-color 0.3s;">
-          取消
-        </button>
+    modal.innerHTML = `
+      <div class="share-modal-content">
+        <h3 class="share-modal-title">选择分享方式</h3>
+        <div class="share-options-group">
+          <button id="copy-share" class="share-btn-item">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            复制为文本
+          </button>
+          <button id="email-share" class="share-btn-item">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+            邮件发送
+          </button>
+          <button id="web-share" class="share-btn-item" style="display: none;" data-supported="false">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+            系统分享
+          </button>
+        </div>
+        <button id="close-share-menu" class="share-btn-cancel">取消</button>
       </div>
     `;
     
-    document.body.appendChild(menu);
+    document.body.appendChild(modal);
     
-    // 检查Web Share API支持
+    // 检查Web Share API支持 (需要 HTTPS)
     if (navigator.share) {
       const webShareBtn = document.getElementById('web-share');
-      webShareBtn.style.display = 'block';
+      webShareBtn.style.display = 'flex';
       webShareBtn.dataset.supported = 'true';
     }
     
@@ -67,7 +56,7 @@ class ShareManager {
     document.getElementById('copy-share').addEventListener('click', async () => {
       try {
         await this.copyToClipboard(content);
-        menu.remove();
+        modal.remove();
         this.showMessage('内容已复制到剪贴板！');
       } catch (error) {
         console.error('复制失败:', error);
@@ -79,13 +68,13 @@ class ShareManager {
       const mailtoUrl = `mailto:?subject=${encodeURIComponent('我的待办事项清单')}&body=${encodeURIComponent(content)}`;
       try {
         window.open(mailtoUrl);
-        menu.remove();
+        modal.remove();
       } catch (error) {
         console.error('邮件分享失败:', error);
         // 备用方案：复制邮件链接
         this.copyToClipboard(mailtoUrl).then(() => {
-          menu.remove();
-          this.showMessage('邮件链接已复制到剪贴板，请手动粘贴到浏览器地址栏');
+          modal.remove();
+          this.showMessage('邮件链接已复制，请粘贴到浏览器地址栏');
         });
       }
     });
@@ -98,30 +87,38 @@ class ShareManager {
             title: '我的待办事项清单',
             text: content
           });
-          menu.remove();
+          modal.remove();
         } catch (error) {
           console.error('系统分享失败:', error);
           this.copyToClipboard(content).then(() => {
-            menu.remove();
-            this.showMessage('系统分享不可用，内容已复制到剪贴板');
+            modal.remove();
+            this.showMessage('系统分享不可用，内容已复制');
           });
         }
       });
     }
     
-    document.getElementById('close-menu').addEventListener('click', () => {
-      menu.remove();
+    const closeModal = () => {
+      modal.remove();
+    };
+
+    document.getElementById('close-share-menu').addEventListener('click', closeModal);
+    
+    // 点击遮罩层关闭
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        closeModal();
+      }
     });
     
-    // 点击菜单外部关闭
-    setTimeout(() => {
-      document.addEventListener('click', function closeMenu(e) {
-        if (!menu.contains(e.target)) {
-          menu.remove();
-          document.removeEventListener('click', closeMenu);
-        }
-      });
-    }, 100);
+    // ESC 键关闭
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        closeModal();
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
   }
 
   /**
@@ -151,20 +148,27 @@ class ShareManager {
   }
 
   /**
-   * 生成任务分享内容
+   * 生成任务分享内容（Markdown 优化版）
    * @param {Array} tasks - 任务数组
    * @returns {string} 分享内容
    */
   generateShareContent(tasks) {
-    const shareContent = `我的待办事项清单（${new Date().toLocaleString()}）\n\n` + 
-      tasks.map((t, i) => {
-        const status = t.completed ? '完成' : '待办';
-        const priority = this.getPriorityLabel(t.priority);
-        const tags = t.tags && t.tags.length > 0 ? ` [${t.tags.join(', ')}]` : '';
-        const date = new Date(t.id).toLocaleDateString();
-        return `${i + 1}. [${status}] [${priority}] ${t.text}${tags} (${date})`;
-      }).join('\n') + 
-      `\n\n统计：共${tasks.length}项任务，已完成${tasks.filter(t => t.completed).length}项`;
+    const dateStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+    let shareContent = `# 我的待办清单（${dateStr}）\n\n`;
+    
+    tasks.forEach((t, i) => {
+      const checkbox = t.completed ? '[x]' : '[ ]';
+      const priority = this.getPriorityLabel(t.priority);
+      const tags = t.tags && t.tags.length > 0 ? ` \`${t.tags.join('`, `')}\`` : '';
+      const due = t.due ? ` 📅 *${new Date(t.due).toLocaleDateString()}*` : '';
+      shareContent += `${i + 1}. ${checkbox} **${t.text}** [${priority}]${tags}${due}\n`;
+      
+      if (t.notes) {
+        shareContent += `   > ${t.notes.replace(/\n/g, '\n   > ')}\n`;
+      }
+    });
+    
+    shareContent += `\n---\n📊 统计：共 ${tasks.length} 项任务，已完成 ${tasks.filter(t => t.completed).length} 项`;
     
     return shareContent;
   }
@@ -176,14 +180,10 @@ class ShareManager {
    */
   getPriorityLabel(priority) {
     switch (priority) {
-      case 'high':
-        return '高';
-      case 'medium':
-        return '中';
-      case 'low':
-        return '低';
-      default:
-        return '中';
+      case 'high': return '🔴 高';
+      case 'medium': return '🟡 中';
+      case 'low': return '🟢 低';
+      default: return '⚪ 中';
     }
   }
 
@@ -193,18 +193,27 @@ class ShareManager {
    * @param {string} type - 消息类型 (success, error)
    */
   showMessage(text, type = 'success') {
+    // 优先尝试调用 popup.js 中的全局 showMessage（样式统一）
+    if (typeof window.showMessage === 'function') {
+      window.showMessage(text, type);
+      return;
+    }
+    
+    // 后备独立样式
     const message = document.createElement('div');
     message.style.cssText = `
       position: fixed;
       top: 20px;
       left: 50%;
       transform: translateX(-50%);
-      background: ${type === 'success' ? '#4CAF50' : '#f44336'};
+      background: ${type === 'success' ? '#111111' : '#ff4444'};
       color: white;
       padding: 10px 20px;
-      border-radius: 0;
+      border-radius: 6px;
       z-index: 1001;
+      font-size: 13px;
       font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.1);
       animation: fadeIn 0.3s ease-in-out;
     `;
     message.textContent = text;

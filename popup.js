@@ -15,6 +15,41 @@ let searchState = {
 const taskManager = new TaskManager();
 const shareManager = new ShareManager();
 
+// 解密函数，和 options.js 中的保持一致以确保互通
+async function decryptText(encryptedText, key) {
+  if (!key || !encryptedText) return encryptedText;
+  try {
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const combined = new Uint8Array([...atob(encryptedText)].map(c => c.charCodeAt(0)));
+    const iv = combined.slice(0, 12);
+    const encrypted = combined.slice(12);
+    
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw', encoder.encode(key), { name: 'PBKDF2' }, false, ['deriveKey']
+    );
+    
+    const cryptoKey = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: encoder.encode('taskmaster-salt'),
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+    );
+    
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv }, cryptoKey, encrypted
+    );
+    
+    return decoder.decode(decrypted);
+  } catch (error) {
+    console.error('解密失败:', error);
+    return null; // 这里需要返回 null 以便触发报错
+  }
+}
+
 /**
  * 统一初始化逻辑 - 页面加载完成后执行
  * 包含所有事件监听器的绑定和初始化操作
@@ -42,6 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const searchNotes = document.getElementById('search-notes');
 
   // AI 助理相关元素
+  const searchToggleBtn = document.getElementById('search-toggle-btn');
+  const searchPopover = document.getElementById('search-popover');
   const aiToggleBtn = document.getElementById('ai-toggle-btn');
   const pinModal = document.getElementById('pin-modal');
   const pinInput = document.getElementById('pin-input');
@@ -59,6 +96,41 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // 初始化搜索按钮切换
+  searchToggleBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isHidden = searchPopover.hidden;
+    searchPopover.hidden = !isHidden;
+    searchToggleBtn.classList.toggle('active', isHidden);
+    
+    // 如果展开了搜索框，自动聚焦输入框
+    if (isHidden) {
+      searchInput?.focus();
+    } else {
+      // 隐藏时清空搜索输入并重置列表显示
+      if (searchInput) searchInput.value = '';
+      searchState.query = '';
+      searchState.showActive = true;
+      searchState.showCompleted = true;
+      searchState.showNotesOnly = false;
+      
+      if (searchActive) searchActive.checked = true;
+      if (searchCompleted) searchCompleted.checked = true;
+      if (searchNotes) searchNotes.checked = false;
+      
+      updateSearchState();
+    }
+  });
+
+  // 点击外部关闭搜索弹层
+  document.addEventListener('click', (e) => {
+    if (!searchPopover || searchPopover.hidden) return;
+    if (!searchPopover.contains(e.target) && !searchToggleBtn.contains(e.target)) {
+      searchPopover.hidden = true;
+      searchToggleBtn.classList.remove('active');
+    }
+  });
+
   aiToggleBtn.addEventListener('click', () => {
     isAiMode = !isAiMode;
     aiToggleBtn.classList.toggle('active', isAiMode);
@@ -69,6 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
       window.storageAdapter.set('AI_GUIDE_SEEN', true);
     }
 
+    taskInput.classList.toggle('ai-mode', isAiMode);
     taskInput.placeholder = isAiMode ? "✨ AI 模式: 输入自然语言 (如: 明天下午3点开会)" : "添加新任务...";
   });
 
@@ -87,9 +160,12 @@ document.addEventListener('DOMContentLoaded', () => {
     
     try {
       const encryptedKey = await window.storageAdapter.get('AI_ENCRYPTED_KEY');
-      const decryptedKey = await window.cryptoAdapter.decrypt(encryptedKey, pin);
+      // 使用本地保持一致的 decryptText 函数进行解密
+      const decryptedKey = await decryptText(encryptedKey, pin);
       
-      if (!decryptedKey) throw new Error("解密失败");
+      if (!decryptedKey || decryptedKey === encryptedKey) {
+        throw new Error("解密失败或 PIN 码错误");
+      }
       
       // Store in session storage for the lifetime of the browser
       if (chrome.storage && chrome.storage.session) {
@@ -117,6 +193,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   async function getSessionApiKey() {
+    // 检查是否启用了加密
+    const aiConfig = await window.storageAdapter.get('AI_CONFIG') || {};
+    if (aiConfig.hasKey && !aiConfig.enableEncryption) {
+      // 如果没有启用加密，直接从 storage 中读取明文 key
+      const plainKey = await window.storageAdapter.get('AI_PLAINTEXT_KEY');
+      if (plainKey) return plainKey;
+    }
+
     if (chrome.storage && chrome.storage.session) {
       const data = await chrome.storage.session.get('AI_DECRYPTED_KEY');
       return data['AI_DECRYPTED_KEY'];
@@ -133,10 +217,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const apiKey = await getSessionApiKey();
     if (!apiKey) {
-      // Need PIN to unlock
-      pendingAiText = text;
-      pinModal.hidden = false;
-      pinInput.focus();
+      if (aiConfig.enableEncryption) {
+        // Need PIN to unlock
+        pendingAiText = text;
+        pinModal.hidden = false;
+        pinInput.focus();
+      } else {
+        alert("未找到 API Key，请前往设置重新配置");
+      }
       return;
     }
 
@@ -191,18 +279,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
       
-      // Auto submit
-      taskForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+      // 暂存原始输入作为备注，结合AI可能提取的要点
+      let finalNotes = `[AI自动生成]\n原始信息：${text}`;
+      if (parsedTask.notes && typeof parsedTask.notes === 'string' && parsedTask.notes.trim()) {
+        // 移除每行可能的前导空格
+        const cleanedNotes = parsedTask.notes.split('\n').map(line => line.trim()).join('\n');
+        finalNotes = `[AI提取要点]\n${cleanedNotes}\n\n${finalNotes}`;
+      }
+      window.currentTaskNotes = finalNotes;
       
-      // Reset AI mode
+      // 先重置 AI 模式，避免死循环
       isAiMode = false;
       aiToggleBtn.classList.remove('active');
+      
+      // Auto submit
+      taskForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
       
     } catch (e) {
       console.error(e);
       alert("AI 解析失败: " + e.message);
     } finally {
       taskInput.disabled = false;
+      taskInput.classList.remove('ai-mode');
       taskInput.placeholder = "添加新任务...";
       taskInput.focus();
     }
@@ -248,8 +346,12 @@ document.addEventListener('DOMContentLoaded', () => {
         text: taskInput.value.trim(),
         priority: taskPriority.value,
         tags: tags,
-        due: dueIso
+        due: dueIso,
+        notes: window.currentTaskNotes || ''
       };
+      
+      // 取出后立即清除，避免污染后续手动创建的任务
+      window.currentTaskNotes = '';
 
       try {
         await taskManager.addTask(taskData);
@@ -655,21 +757,21 @@ async function renderTasks() {
         const isToday = date === today.toLocaleDateString();
         const isYesterday = date === yesterday.toLocaleDateString();
         
-        // 优先使用用户之前的折叠状态，没有则使用默认逻辑（展开今天和昨天）
-        let shouldExpand;
-        if (expandedStates[date] !== undefined) {
-          shouldExpand = expandedStates[date];
-        } else {
-          shouldExpand = isToday || isYesterday;
-        }
-        
-        html += `<div class="date-section">
-                  <div class="date-header" data-date="${date}">
-                    ${date} 
-                    <span class="toggle-icon">${shouldExpand ? '▼' : '▶'}</span>
-                  </div>
-                  <div class="date-content" style="${shouldExpand ? '' : 'display:none'}">
-                    <ul>`;
+    // 优先使用用户之前的折叠状态，没有则使用默认逻辑（展开今天和昨天）
+    let shouldExpand;
+    if (expandedStates[date] !== undefined) {
+      shouldExpand = expandedStates[date];
+    } else {
+      shouldExpand = isToday || isYesterday;
+    }
+    
+    html += `<div class="date-section">
+              <div class="date-header" data-date="${date}">
+                ${date} 
+                <span class="toggle-icon">${shouldExpand ? '▼' : '▶'}</span>
+              </div>
+              <div class="date-content" style="${shouldExpand ? '' : 'display:none'}">
+                <ul>`;
         
         tasksByDate[date].forEach(task => {
           html += generateTaskItemHtml(task);
@@ -680,13 +782,38 @@ async function renderTasks() {
       
       // 渲染归档区域
       if (archivedTasks.length > 0) {
+        // 对归档任务按完成时间或创建时间倒序排序
+        archivedTasks.sort((a, b) => new Date(b.completedAt || b.createdAt || 0) - new Date(a.completedAt || a.createdAt || 0));
+        
+        const recentArchived = archivedTasks.slice(0, 6); // 修改为展示最新 6 条
+        const foldedArchived = archivedTasks.slice(6);
+        
+        let shouldExpandArchive = expandedStates['archive-folded'] === true;
+
         html += `<div class="archive-section">
                   <div class="archive-title">归档</div>
-                  <ul>`;
-        archivedTasks.forEach(task => {
-          html += generateTaskItemHtml(task);
+                  <ul class="archive-grid">`;
+        
+        recentArchived.forEach(task => {
+          html += generateTaskItemHtml(task, true); // 传参告知是归档任务
         });
-        html += '</ul></div>';
+        
+        if (foldedArchived.length > 0) {
+          html += `</ul>
+                   <div class="date-header archive-folded-header" data-date="archive-folded" style="margin-top: 12px;">
+                     更多已归档任务 (${foldedArchived.length})
+                     <span class="toggle-icon">${shouldExpandArchive ? '▼' : '▶'}</span>
+                   </div>
+                   <div class="date-content" style="${shouldExpandArchive ? '' : 'display:none'}">
+                     <ul class="archive-grid" style="margin-top: 12px;">`;
+          foldedArchived.forEach(task => {
+            html += generateTaskItemHtml(task, true);
+          });
+          html += `</ul></div>`;
+        } else {
+          html += '</ul>';
+        }
+        html += '</div>';
       }
       
       // 保存滚动条位置
@@ -705,10 +832,17 @@ async function renderTasks() {
 
 // 生成任务项HTML的函数
 function generateTaskItemHtml(task) {
-  // 处理备注内容，防止XSS攻击
-  const notesHtml = task.notes ? `
-    <div class="task-notes">
-      <span class="task-notes-label">备注：</span>${escapeHtml(task.notes)}
+  // 处理备注内容，改为图标提示
+  const notesHtml = (task.notes && task.notes.trim() !== '') ? `
+    <div class="task-notes-indicator" title="附带备注 (点击查看/修改)">
+      <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="note-icon">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="16" y1="13" x2="8" y2="13"></line>
+        <line x1="16" y1="17" x2="8" y2="17"></line>
+        <polyline points="10 9 9 9 8 9"></polyline>
+      </svg>
+      <span>有备注</span>
     </div>
   ` : '';
 

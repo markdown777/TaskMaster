@@ -11,8 +11,12 @@ function escapeHtml(text) {
   if (!text) return '';
   const div = document.createElement('div');
   div.textContent = text;
-  // 替换引号，确保在HTML属性中使用也是安全的
-  return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  // 替换引号和换行符，确保在HTML属性中使用也是安全的，并且保留换行
+  return div.innerHTML
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/\n/g, '&#10;')
+    .replace(/\r/g, '&#13;');
 }
 
 /**

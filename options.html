@@ -273,6 +273,14 @@
       <p class="subtitle" style="margin-bottom: 24px;">配置大语言模型接口，启用智能自然语言解析与截图任务提取功能。</p>
       
       <div class="control-group">
+        <label class="modern-checkbox">
+          <input type="checkbox" id="aiEnableEncryption">
+          <div class="label-text">
+            <span class="title">启用 API 安全加密</span>
+            <span class="desc">勾选后将使用 PIN 码对 API Key 进行 AES-256 加密。不勾选则明文存储，使用 AI 功能时无需解锁。</span>
+          </div>
+        </label>
+
         <div class="modern-input-group" style="margin-left: 0;">
           <label class="title" style="font-weight:600; margin-bottom: 4px;" for="aiProvider">模型提供商</label>
           <select id="aiProvider">
@@ -294,7 +302,7 @@
           </p>
         </div>
 
-        <div class="modern-input-group" style="margin-left: 0;">
+        <div class="modern-input-group" id="aiPinCodeGroup" style="margin-left: 0; display: none;">
           <label class="title" style="font-weight:600; margin-bottom: 4px;" for="aiPinCode">安全加密 PIN 码</label>
           <input type="password" id="aiPinCode" placeholder="设置一个4位数PIN码用于加密您的 API Key" maxlength="4">
           <p class="desc" style="font-size:13px; color:var(--text-secondary); margin-top:4px;">您的 API Key 将通过此 PIN 码加密并仅存储在本地。每次重启浏览器需要输入此 PIN 解锁。</p>

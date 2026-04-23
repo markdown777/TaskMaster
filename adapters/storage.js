@@ -24,6 +24,15 @@ class StorageAdapter {
     }
     localStorage.setItem(key, value);
   }
+
+  async remove(key) {
+    if (this.isChrome) {
+      return new Promise(resolve => {
+        chrome.storage.local.remove(key, resolve);
+      });
+    }
+    localStorage.removeItem(key);
+  }
 }
 
 // Attach to window for global access

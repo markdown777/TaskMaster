@@ -10,7 +10,13 @@
     <div class="header">
       <h1>TaskMaster</h1>
       <div class="header-actions">
-        <button id="ai-toggle-btn" class="icon-btn" title="✨ AI 智能录入">✨</button>
+        <button id="ai-toggle-btn" class="icon-btn" title="✨ AI 智能分析">✨</button>
+        <button id="search-toggle-btn" class="icon-btn" title="搜索任务">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </button>
         <!-- 原有的设置按钮在底部，这里仅按照计划添加 -->
       </div>
     </div>
@@ -46,25 +52,27 @@
       </form>
     </div>
     
-    <!-- 搜索功能 -->
-    <div class="search-container">
-      <div class="search-box">
-        <input type="text" id="search-input" placeholder="搜索任务..." autocomplete="off">
-        <button id="search-clear" class="search-clear-btn" title="清空">×</button>
-      </div>
-      <div class="search-filters">
-        <label class="filter-checkbox">
-          <input type="checkbox" id="search-active" checked>
-          <span>活动</span>
-        </label>
-        <label class="filter-checkbox">
-          <input type="checkbox" id="search-completed" checked>
-          <span>已完成</span>
-        </label>
-        <label class="filter-checkbox">
-          <input type="checkbox" id="search-notes">
-          <span>有备注</span>
-        </label>
+    <!-- 搜索功能弹出层 -->
+    <div id="search-popover" class="search-popover" hidden>
+      <div class="search-popover-inner">
+        <div class="search-box">
+          <input type="text" id="search-input" placeholder="搜索任务..." autocomplete="off">
+          <button id="search-clear" class="search-clear-btn" title="清空">×</button>
+        </div>
+        <div class="search-filters">
+          <label class="filter-checkbox">
+            <input type="checkbox" id="search-active" checked>
+            <span>活动</span>
+          </label>
+          <label class="filter-checkbox">
+            <input type="checkbox" id="search-completed" checked>
+            <span>已完成</span>
+          </label>
+          <label class="filter-checkbox">
+            <input type="checkbox" id="search-notes">
+            <span>有备注</span>
+          </label>
+        </div>
       </div>
     </div>
     <ul id="task-list" class="task-list"></ul>
