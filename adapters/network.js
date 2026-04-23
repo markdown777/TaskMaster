@@ -18,7 +18,8 @@ class NetworkAdapter {
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errText}`);
+      // 返回结构化的错误以便上层处理
+      throw new Error(errText);
     }
 
     return await response.json();

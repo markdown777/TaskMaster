@@ -50,6 +50,11 @@ async function decryptText(encryptedText, key) {
   }
 }
 
+// 全局状态变量
+let isAiMode = false;
+let pendingAiText = "";
+let pendingAiIsImage = false;
+
 /**
  * 统一初始化逻辑 - 页面加载完成后执行
  * 包含所有事件监听器的绑定和初始化操作
@@ -85,9 +90,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const pinSubmitBtn = document.getElementById('pin-submit-btn');
   const pinCancelBtn = document.getElementById('pin-cancel-btn');
   const pinError = document.getElementById('pin-error');
-  
-  let isAiMode = false;
-  let pendingAiText = "";
 
   // 1. 初始化 AI 按钮首次引导状态
   window.storageAdapter.get('AI_GUIDE_SEEN').then(isAIGuideSeen => {
@@ -142,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     taskInput.classList.toggle('ai-mode', isAiMode);
-    taskInput.placeholder = isAiMode ? "✨ AI 模式: 输入自然语言 (如: 明天下午3点开会)" : "添加新任务...";
+    taskInput.placeholder = isAiMode ? "✨ AI 模式: 输入自然语言 或 粘贴聊天截图" : "添加新任务...";
   });
 
   pinCancelBtn?.addEventListener('click', () => {
@@ -159,20 +161,45 @@ document.addEventListener('DOMContentLoaded', () => {
     pinSubmitBtn.textContent = '解密中...';
     
     try {
-      const encryptedKey = await window.storageAdapter.get('AI_ENCRYPTED_KEY');
-      // 使用本地保持一致的 decryptText 函数进行解密
-      const decryptedKey = await decryptText(encryptedKey, pin);
-      
-      if (!decryptedKey || decryptedKey === encryptedKey) {
-        throw new Error("解密失败或 PIN 码错误");
+      const aiConfig = await window.storageAdapter.get('AI_CONFIG') || {};
+      const visionConfig = await window.storageAdapter.get('VISION_CONFIG') || {};
+
+      let anyDecrypted = false;
+
+      // 尝试解密 AI Key
+      if (aiConfig.enableEncryption) {
+        const encryptedKey = await window.storageAdapter.get('AI_ENCRYPTED_KEY');
+        if (encryptedKey) {
+          const decryptedKey = await decryptText(encryptedKey, pin);
+          if (decryptedKey && decryptedKey !== encryptedKey) {
+            if (chrome.storage && chrome.storage.session) {
+              await chrome.storage.session.set({ 'AI_DECRYPTED_KEY': decryptedKey });
+            } else {
+              window.sessionStorage.setItem('AI_DECRYPTED_KEY', decryptedKey);
+            }
+            anyDecrypted = true;
+          }
+        }
       }
-      
-      // Store in session storage for the lifetime of the browser
-      if (chrome.storage && chrome.storage.session) {
-        await chrome.storage.session.set({ 'AI_DECRYPTED_KEY': decryptedKey });
-      } else {
-        // Fallback for environments without session storage
-        window.sessionStorage.setItem('AI_DECRYPTED_KEY', decryptedKey);
+
+      // 尝试解密 Vision Key
+      if (visionConfig.enableEncryption) {
+        const encryptedKey = await window.storageAdapter.get('VISION_ENCRYPTED_KEY');
+        if (encryptedKey) {
+          const decryptedKey = await decryptText(encryptedKey, pin);
+          if (decryptedKey && decryptedKey !== encryptedKey) {
+            if (chrome.storage && chrome.storage.session) {
+              await chrome.storage.session.set({ 'VISION_DECRYPTED_KEY': decryptedKey });
+            } else {
+              window.sessionStorage.setItem('VISION_DECRYPTED_KEY', decryptedKey);
+            }
+            anyDecrypted = true;
+          }
+        }
+      }
+
+      if (!anyDecrypted) {
+        throw new Error("解密失败或 PIN 码错误");
       }
       
       pinModal.hidden = true;
@@ -181,8 +208,9 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Resume the AI parsing
       if (pendingAiText) {
-        processAiInput(pendingAiText);
+        processAiInput(pendingAiText, pendingAiIsImage);
         pendingAiText = "";
+        pendingAiIsImage = false;
       }
     } catch (e) {
       pinError.hidden = false;
@@ -208,36 +236,68 @@ document.addEventListener('DOMContentLoaded', () => {
     return window.sessionStorage.getItem('AI_DECRYPTED_KEY');
   }
 
-  async function processAiInput(text) {
-    const aiConfig = await window.storageAdapter.get('AI_CONFIG');
-    if (!aiConfig || !aiConfig.hasKey) {
-      alert("请先在设置页配置 AI 助理的 API Key");
-      return;
+  // 获取 Vision API Key (根据加密状态)
+  async function getSessionVisionApiKey() {
+    const visionConfig = await window.storageAdapter.get('VISION_CONFIG');
+    if (!visionConfig) return null;
+
+    if (visionConfig.hasKey && !visionConfig.enableEncryption) {
+      // 如果没有启用加密，直接从 storage 中读取明文 key
+      const plainKey = await window.storageAdapter.get('VISION_PLAINTEXT_KEY');
+      if (plainKey) return plainKey;
     }
 
-    const apiKey = await getSessionApiKey();
+    if (chrome.storage && chrome.storage.session) {
+      const data = await chrome.storage.session.get('VISION_DECRYPTED_KEY');
+      return data['VISION_DECRYPTED_KEY'];
+    }
+    return window.sessionStorage.getItem('VISION_DECRYPTED_KEY');
+  }
+
+  async function processAiInput(inputData, isImage = false) {
+    let config, apiKey;
+
+    if (isImage) {
+      config = await window.storageAdapter.get('VISION_CONFIG');
+      if (!config || !config.hasKey || config.provider === 'off') {
+        alert("请先在设置页配置 🖼️ 图片识别 (Vision/OCR) 的模型与 API Key");
+        return;
+      }
+      apiKey = await getSessionVisionApiKey();
+    } else {
+      config = await window.storageAdapter.get('AI_CONFIG');
+      if (!config || !config.hasKey || config.provider === 'off') {
+        alert("请先在设置页配置 ✨ AI 助理的 API Key");
+        return;
+      }
+      apiKey = await getSessionApiKey();
+    }
+
     if (!apiKey) {
-      if (aiConfig.enableEncryption) {
+      if (config.enableEncryption) {
         // Need PIN to unlock
-        pendingAiText = text;
+        pendingAiText = inputData;
+        pendingAiIsImage = isImage;
         pinModal.hidden = false;
         pinInput.focus();
       } else {
-        alert("未找到 API Key，请前往设置重新配置");
+        alert(`未找到 ${isImage ? '图片识别' : 'AI 助理'} 的 API Key，请前往设置重新配置`);
       }
       return;
     }
 
     // Change UI state to loading
     const originalPlaceholder = taskInput.placeholder;
-    taskInput.placeholder = "✨ AI 正在思考中...";
+    taskInput.placeholder = isImage ? "✨ AI 正在解析截图内容..." : "✨ AI 正在思考中...";
     taskInput.disabled = true;
 
     try {
-      const parsedTask = await window.aiService.parseTaskFromText(text, apiKey, aiConfig.provider, aiConfig.baseUrl);
+      const parsedTask = isImage 
+        ? await window.aiService.parseTaskFromImage(inputData, apiKey, config.provider, config.baseUrl, config.model)
+        : await window.aiService.parseTaskFromText(inputData, apiKey, config.provider, config.baseUrl, config.model);
       
       // Populate the form
-      taskInput.value = parsedTask.title || text;
+      taskInput.value = parsedTask.title || (isImage ? "图片任务解析结果" : inputData);
       
       if (parsedTask.priority) {
         document.getElementById('task-priority').value = parsedTask.priority;
@@ -280,7 +340,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       
       // 暂存原始输入作为备注，结合AI可能提取的要点
-      let finalNotes = `[AI自动生成]\n原始信息：${text}`;
+      let finalNotes = `[AI自动生成]\n原始信息：${isImage ? "[图片截图]" : inputData}`;
       if (parsedTask.notes && typeof parsedTask.notes === 'string' && parsedTask.notes.trim()) {
         // 移除每行可能的前导空格
         const cleanedNotes = parsedTask.notes.split('\n').map(line => line.trim()).join('\n');
@@ -292,8 +352,53 @@ document.addEventListener('DOMContentLoaded', () => {
       isAiMode = false;
       aiToggleBtn.classList.remove('active');
       
-      // Auto submit
-      taskForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+      // 触发提交创建任务
+      const tags = document.getElementById('task-tags').value
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(tag => tag !== '');
+      
+      let dueValue = document.getElementById('task-due').value;
+      // 如果解析成功并且页面元素没来得及更新 value，我们直接从 parsedTask 中取并格式化
+      if (!dueValue && parsedTask.due_date) {
+        let dateStr = parsedTask.due_date.replace(/\//g, '-').replace(' ', 'T');
+        if (dateStr.length > 16) dateStr = dateStr.slice(0, 16);
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateStr)) {
+          dueValue = dateStr;
+        } else {
+          const dateObj = new Date(dateStr);
+          if (!isNaN(dateObj.getTime())) {
+            const tzOffset = dateObj.getTimezoneOffset() * 60000;
+            dueValue = (new Date(dateObj - tzOffset)).toISOString().slice(0, 16);
+          }
+        }
+      }
+
+      const dueIso = dueValue ? new Date(dueValue).toISOString() : new Date(Date.now() + 3600000).toISOString();
+      
+      const taskData = {
+        text: taskInput.value.trim(),
+        priority: document.getElementById('task-priority').value,
+        tags: tags,
+        due: dueIso,
+        notes: window.currentTaskNotes || ''
+      };
+      
+      window.currentTaskNotes = '';
+
+      await taskManager.addTask(taskData);
+      
+      // 清空表单
+      taskInput.value = '';
+      document.getElementById('task-priority').value = 'medium';
+      document.getElementById('task-tags').value = '';
+      document.getElementById('task-due').value = '';
+      updateDueButtonState(document.getElementById('due-button'), '');
+      
+      renderTasks();
+      
+      // 添加任务后，显示成功提示
+      showMessage('✨ AI 解析成功并已添加任务', 'success');
       
     } catch (e) {
       console.error(e);
@@ -316,6 +421,32 @@ document.addEventListener('DOMContentLoaded', () => {
     console.error('Chrome storage API不可用');
   }
 
+  // 监听粘贴事件，捕获截图并调用 AI 视觉大模型
+  document.addEventListener('paste', (e) => {
+    const items = (e.clipboardData || window.clipboardData).items;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.indexOf('image/') !== -1) {
+        e.preventDefault(); // 阻止默认粘贴行为
+        
+        const blob = item.getAsFile();
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          const base64Image = event.target.result;
+          
+          // 自动进入 AI 模式以提供视觉反馈
+          isAiMode = true;
+          aiToggleBtn.classList.add('active');
+          taskInput.classList.add('ai-mode');
+          
+          await processAiInput(base64Image, true);
+        };
+        reader.readAsDataURL(blob);
+        return; // 只处理找到的第一张图片
+      }
+    }
+  });
+
   /**
    * 表单提交处理 - 创建新任务
    */
@@ -327,7 +458,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (isAiMode) {
       taskInput.value = ''; // clear input immediately for UX
-      await processAiInput(title);
+      await processAiInput(title, false);
       return;
     }
     

@@ -1,20 +1,16 @@
 // 默认设置
 const DEFAULT_SETTINGS = {
-  // 安全设置
   enableEncryption: false,
   encryptionKey: '',
-  
-  // 显示设置
+
   showCompletedTasks: true,
   autoExpandToday: true,
   showTaskStats: true,
-  
-  // 行为设置
+
   confirmDelete: true,
   autoSaveNotes: true,
   taskRetentionDays: 90,
-  
-  // 提醒设置
+
   enableNotifications: true,
   soundNotifications: false
 };
@@ -195,6 +191,19 @@ async function loadSettings() {
   }
 
   toggleAiProvider();
+
+  // Load VISION_CONFIG
+  const visionConfig = await window.storageAdapter.get('VISION_CONFIG') || { provider: 'off', baseUrl: '', model: '', enableEncryption: false };
+  document.getElementById('visionProvider').value = visionConfig.provider || 'off';
+  document.getElementById('visionBaseUrl').value = visionConfig.baseUrl || '';
+  document.getElementById('visionModel').value = visionConfig.model || '';
+  document.getElementById('visionEnableEncryption').checked = visionConfig.enableEncryption || false;
+
+  if (visionConfig.hasKey) {
+    document.getElementById('visionApiKey').placeholder = visionConfig.enableEncryption ? '已配置 (已加密，请重新输入更新)' : '已配置 (未加密，请重新输入更新)';
+  }
+
+  toggleVisionProvider();
 }
 
 // 保存设置
@@ -237,17 +246,132 @@ async function saveSettings() {
       await window.storageAdapter.remove('AI_ENCRYPTED_KEY'); // 确保清除密文
       aiConfig.hasKey = true;
     }
-  } else if (enableEncryption && pinCode) {
-    // 仅修改了PIN码，需要重新加密现有的明文或旧密文
-    // 逻辑较复杂，这里简化处理：要求用户重新输入Key
-    showMessage('更改加密状态或PIN码需要重新输入 API Key', 'error');
-    return;
-  } else if (enableEncryption && !pinCode && aiConfig.hasKey) {
-     showMessage('已启用加密，请输入 PIN 码及 API Key 以完成设置', 'error');
-     return;
+  } else {
+    // 未提供新的 API Key：允许仅更新其他设置
+    if (enableEncryption) {
+      // 场景1：之前是明文 key，现在希望启用加密但不想重新输入 key
+      const plainKey = await window.storageAdapter.get('AI_PLAINTEXT_KEY');
+      if (plainKey) {
+        if (pinCode.length < 4) {
+          showMessage('启用加密时，PIN 码必须至少4位', 'error');
+          return;
+        }
+        try {
+          const encryptedKey = await encryptText(plainKey, pinCode);
+          if (!encryptedKey || encryptedKey === plainKey) {
+            throw new Error('加密失败，返回了明文');
+          }
+          await window.storageAdapter.set('AI_ENCRYPTED_KEY', encryptedKey);
+          await window.storageAdapter.remove('AI_PLAINTEXT_KEY');
+          aiConfig.hasKey = true;
+        } catch (e) {
+          console.error("Encryption failed", e);
+          showMessage('加密 API Key 失败，请重试。', 'error');
+          return;
+        }
+      } else {
+        // 场景2：已经是加密 key，仅验证 PIN 是否匹配（用于“复用 PIN”不误判为改 PIN）
+        const existingEncrypted = await window.storageAdapter.get('AI_ENCRYPTED_KEY');
+        if (existingEncrypted) {
+          if (pinCode) {
+            const decryptedKey = await decryptText(existingEncrypted, pinCode);
+            if (!decryptedKey || decryptedKey === existingEncrypted) {
+              showMessage('PIN 码不匹配。如需更换 PIN，请重新输入 API Key。', 'error');
+              return;
+            }
+          }
+        } else if (!aiConfig.hasKey) {
+          // 没有任何 key
+          showMessage('请先输入 API Key 以完成设置', 'error');
+          return;
+        }
+      }
+    }
   }
 
   await window.storageAdapter.set('AI_CONFIG', aiConfig);
+
+  // 保存 Vision 配置
+  const visionProvider = document.getElementById('visionProvider').value;
+  const visionConfig = await window.storageAdapter.get('VISION_CONFIG') || {};
+  visionConfig.provider = visionProvider;
+
+  if (visionProvider === 'off') {
+    await window.storageAdapter.remove('VISION_ENCRYPTED_KEY');
+    await window.storageAdapter.remove('VISION_PLAINTEXT_KEY');
+    visionConfig.hasKey = false;
+  } else {
+    visionConfig.baseUrl = document.getElementById('visionBaseUrl').value;
+    visionConfig.model = document.getElementById('visionModel').value;
+    visionConfig.enableEncryption = document.getElementById('visionEnableEncryption').checked;
+    const visionApiKey = document.getElementById('visionApiKey').value;
+
+    if (visionApiKey) {
+      if (visionConfig.enableEncryption) {
+        if (pinCode.length < 4) {
+          showMessage('启用 Vision 加密时，PIN 码必须至少4位', 'error');
+          return;
+        }
+        try {
+          const encryptedKey = await encryptText(visionApiKey, pinCode);
+          if (!encryptedKey || encryptedKey === visionApiKey) {
+            throw new Error('加密失败，返回了明文');
+          }
+          await window.storageAdapter.set('VISION_ENCRYPTED_KEY', encryptedKey);
+          await window.storageAdapter.remove('VISION_PLAINTEXT_KEY');
+          visionConfig.hasKey = true;
+        } catch (e) {
+          console.error("Vision Encryption failed", e);
+          showMessage('加密 Vision API Key 失败，请重试。', 'error');
+          return;
+        }
+      } else {
+        await window.storageAdapter.set('VISION_PLAINTEXT_KEY', visionApiKey);
+        await window.storageAdapter.remove('VISION_ENCRYPTED_KEY');
+        visionConfig.hasKey = true;
+      }
+    } else {
+      // 未提供新的 Vision API Key：允许仅更新其他设置
+      if (visionConfig.enableEncryption) {
+        const plainVisionKey = await window.storageAdapter.get('VISION_PLAINTEXT_KEY');
+        if (plainVisionKey) {
+          if (pinCode.length < 4) {
+            showMessage('启用 Vision 加密时，PIN 码必须至少4位', 'error');
+            return;
+          }
+          try {
+            const encryptedKey = await encryptText(plainVisionKey, pinCode);
+            if (!encryptedKey || encryptedKey === plainVisionKey) {
+              throw new Error('加密失败，返回了明文');
+            }
+            await window.storageAdapter.set('VISION_ENCRYPTED_KEY', encryptedKey);
+            await window.storageAdapter.remove('VISION_PLAINTEXT_KEY');
+            visionConfig.hasKey = true;
+          } catch (e) {
+            console.error("Vision Encryption failed", e);
+            showMessage('加密 Vision API Key 失败，请重试。', 'error');
+            return;
+          }
+        } else {
+          const existingEncrypted = await window.storageAdapter.get('VISION_ENCRYPTED_KEY');
+          if (existingEncrypted) {
+            if (pinCode) {
+              const decryptedKey = await decryptText(existingEncrypted, pinCode);
+              if (!decryptedKey || decryptedKey === existingEncrypted) {
+                showMessage('PIN 码不匹配。如需更换 PIN，请重新输入 Vision API Key。', 'error');
+                return;
+              }
+            }
+          } else if (!visionConfig.hasKey) {
+            showMessage('请先输入 Vision API Key 以完成设置', 'error');
+            return;
+          }
+        }
+      }
+    }
+  }
+  
+  await window.storageAdapter.set('VISION_CONFIG', visionConfig);
 
   const settings = {
     // 安全设置
@@ -351,6 +475,40 @@ function toggleAiProvider() {
     customUrlGroup.style.display = 'none';
     deepseekHelp.style.display = 'block';
   }
+}
+
+// 切换 Vision 配置显示
+function toggleVisionProvider() {
+  const provider = document.getElementById('visionProvider').value;
+  const configGroup = document.getElementById('visionConfigGroup');
+  const curlGroup = document.getElementById('visionCurlGroup');
+  const baseUrlInput = document.getElementById('visionBaseUrl');
+  
+  if (provider === 'off') {
+    configGroup.style.display = 'none';
+  } else {
+    configGroup.style.display = 'block';
+    if (provider === 'doubao') {
+      curlGroup.style.display = 'block';
+      if (!baseUrlInput.value) {
+        baseUrlInput.value = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+      }
+    } else {
+      curlGroup.style.display = 'none';
+    }
+  }
+}
+
+// 解析 Doubao curl
+function parseDoubaoCurl(curlText) {
+  const urlMatch = curlText.match(/curl\s+(?:\\?[`'"])?(https?:\/\/[^\s`'"\\]+)/i);
+  const authMatch = curlText.match(/Authorization:\s*Bearer\s+([^"\s\\]+)/i);
+  const modelMatch = curlText.match(/"model"\s*:\s*"([^"]+)"/i);
+  return {
+    baseUrl: urlMatch ? urlMatch[1] : null,
+    apiKey: authMatch ? authMatch[1] : null,
+    model: modelMatch ? modelMatch[1] : null,
+  };
 }
 
 // 切换加密 PIN 码显示
@@ -577,7 +735,38 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('aiProvider').addEventListener('change', toggleAiProvider);
   document.getElementById('aiEnableEncryption').addEventListener('change', toggleAiEncryption);
   
-  // 事件监听器
+  // Vision 配置选项切换
+  document.getElementById('visionProvider').addEventListener('change', toggleVisionProvider);
+
+  // Vision Curl 解析
+  document.getElementById('parseVisionCurlBtn').addEventListener('click', () => {
+    const curlText = document.getElementById('visionCurlInput').value;
+    if (!curlText.trim()) return;
+    const parsed = parseDoubaoCurl(curlText);
+    if (parsed.baseUrl) document.getElementById('visionBaseUrl').value = parsed.baseUrl;
+    if (parsed.model) document.getElementById('visionModel').value = parsed.model;
+    if (parsed.apiKey) document.getElementById('visionApiKey').value = parsed.apiKey;
+    showMessage('已解析并填充 curl 配置，请点击保存设置！');
+  });
+
+  // 全局粘贴监听，拦截 curl
+  document.addEventListener('paste', (e) => {
+    const text = (e.clipboardData || window.clipboardData).getData('text');
+    if (text && text.trim().startsWith('curl') && text.includes('ark.cn-beijing.volces.com')) {
+      if (confirm('检测到 Doubao API cURL 配置，是否应用到图片识别配置？')) {
+        const parsed = parseDoubaoCurl(text);
+        document.getElementById('visionProvider').value = 'doubao';
+        toggleVisionProvider();
+        if (parsed.baseUrl) document.getElementById('visionBaseUrl').value = parsed.baseUrl;
+        if (parsed.model) document.getElementById('visionModel').value = parsed.model;
+        if (parsed.apiKey) document.getElementById('visionApiKey').value = parsed.apiKey;
+        document.getElementById('visionCurlInput').value = text;
+        showMessage('配置已填充，请点击底部保存设置。');
+      }
+    }
+  });
+
+  // 按钮事件绑定
   document.getElementById('saveSettings').addEventListener('click', saveSettings);
   document.getElementById('resetSettings').addEventListener('click', resetSettings);
   document.getElementById('exportData').addEventListener('click', exportData);
