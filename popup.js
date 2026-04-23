@@ -41,6 +41,142 @@ document.addEventListener('DOMContentLoaded', () => {
   const searchCompleted = document.getElementById('search-completed');
   const searchNotes = document.getElementById('search-notes');
 
+  // AI 助理相关元素
+  const aiToggleBtn = document.getElementById('ai-toggle-btn');
+  const pinModal = document.getElementById('pin-modal');
+  const pinInput = document.getElementById('pin-input');
+  const pinSubmitBtn = document.getElementById('pin-submit-btn');
+  const pinCancelBtn = document.getElementById('pin-cancel-btn');
+  const pinError = document.getElementById('pin-error');
+  
+  let isAiMode = false;
+  let pendingAiText = "";
+
+  aiToggleBtn?.addEventListener('click', () => {
+    isAiMode = !isAiMode;
+    aiToggleBtn.classList.toggle('active', isAiMode);
+    taskInput.placeholder = isAiMode ? "✨ AI 模式: 输入自然语言 (如: 明天下午3点开会)" : "添加新任务...";
+  });
+
+  pinCancelBtn?.addEventListener('click', () => {
+    pinModal.hidden = true;
+    pinInput.value = '';
+    pinError.hidden = true;
+  });
+
+  pinSubmitBtn?.addEventListener('click', async () => {
+    const pin = pinInput.value;
+    if (pin.length < 4) return;
+    
+    pinSubmitBtn.disabled = true;
+    pinSubmitBtn.textContent = '解密中...';
+    
+    try {
+      const encryptedKey = await window.storageAdapter.get('AI_ENCRYPTED_KEY');
+      const decryptedKey = await window.cryptoAdapter.decrypt(encryptedKey, pin);
+      
+      if (!decryptedKey) throw new Error("解密失败");
+      
+      // Store in session storage for the lifetime of the browser
+      if (chrome.storage && chrome.storage.session) {
+        await chrome.storage.session.set({ 'AI_DECRYPTED_KEY': decryptedKey });
+      } else {
+        // Fallback for environments without session storage
+        window.sessionStorage.setItem('AI_DECRYPTED_KEY', decryptedKey);
+      }
+      
+      pinModal.hidden = true;
+      pinInput.value = '';
+      pinError.hidden = true;
+      
+      // Resume the AI parsing
+      if (pendingAiText) {
+        processAiInput(pendingAiText);
+        pendingAiText = "";
+      }
+    } catch (e) {
+      pinError.hidden = false;
+    } finally {
+      pinSubmitBtn.disabled = false;
+      pinSubmitBtn.textContent = '解锁';
+    }
+  });
+
+  async function getSessionApiKey() {
+    if (chrome.storage && chrome.storage.session) {
+      const data = await chrome.storage.session.get('AI_DECRYPTED_KEY');
+      return data['AI_DECRYPTED_KEY'];
+    }
+    return window.sessionStorage.getItem('AI_DECRYPTED_KEY');
+  }
+
+  async function processAiInput(text) {
+    const aiConfig = await window.storageAdapter.get('AI_CONFIG');
+    if (!aiConfig || !aiConfig.hasKey) {
+      alert("请先在设置页配置 AI 助理的 API Key");
+      return;
+    }
+
+    const apiKey = await getSessionApiKey();
+    if (!apiKey) {
+      // Need PIN to unlock
+      pendingAiText = text;
+      pinModal.hidden = false;
+      pinInput.focus();
+      return;
+    }
+
+    // Change UI state to loading
+    const originalPlaceholder = taskInput.placeholder;
+    taskInput.placeholder = "✨ AI 正在思考中...";
+    taskInput.disabled = true;
+
+    try {
+      const parsedTask = await window.aiService.parseTaskFromText(text, apiKey, aiConfig.provider, aiConfig.baseUrl);
+      
+      // Populate the form
+      taskInput.value = parsedTask.title || text;
+      
+      if (parsedTask.priority) {
+        document.getElementById('task-priority').value = parsedTask.priority;
+      }
+      
+      if (parsedTask.tags && parsedTask.tags.length > 0) {
+        document.getElementById('task-tags').value = parsedTask.tags.join(', ');
+      }
+      
+      if (parsedTask.due_date) {
+        // Format to local datetime-local string format: YYYY-MM-DDTHH:mm
+        const dateObj = new Date(parsedTask.due_date);
+        if (!isNaN(dateObj.getTime())) {
+          const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+          const localISOTime = (new Date(dateObj - tzOffset)).toISOString().slice(0,16);
+          document.getElementById('task-due').value = localISOTime;
+          // Update due button visual
+          const dueButton = document.getElementById('due-button');
+          dueButton.textContent = '已设时间';
+          dueButton.style.background = 'var(--brand-color)';
+          dueButton.style.color = 'var(--bg-primary)';
+        }
+      }
+      
+      // Auto submit
+      taskForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+      
+      // Reset AI mode
+      isAiMode = false;
+      aiToggleBtn.classList.remove('active');
+      
+    } catch (e) {
+      console.error(e);
+      alert("AI 解析失败: " + e.message);
+    } finally {
+      taskInput.disabled = false;
+      taskInput.placeholder = "添加新任务...";
+      taskInput.focus();
+    }
+  }
+
   // 增强存储回调验证
   if (chrome.storage) {
     chrome.storage.onChanged.addListener((changes) => {
@@ -57,7 +193,16 @@ document.addEventListener('DOMContentLoaded', () => {
   taskForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     
-    if (taskInput.value.trim()) {
+    const title = taskInput.value.trim();
+    if (!title) return;
+
+    if (isAiMode) {
+      taskInput.value = ''; // clear input immediately for UX
+      await processAiInput(title);
+      return;
+    }
+    
+    if (title) {
       // 解析标签
       const tags = taskTags.value
         .split(',')
