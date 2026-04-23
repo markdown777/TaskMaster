@@ -267,6 +267,43 @@
 
     <hr class="separator" />
 
+    <!-- AI 助理配置 -->
+    <section class="section-block">
+      <h3>✨ AI 助理配置</h3>
+      <p class="subtitle" style="margin-bottom: 24px;">配置大语言模型接口，启用智能自然语言解析与截图任务提取功能。</p>
+      
+      <div class="control-group">
+        <div class="modern-input-group" style="margin-left: 0;">
+          <label class="title" style="font-weight:600; margin-bottom: 4px;" for="aiProvider">模型提供商</label>
+          <select id="aiProvider">
+            <option value="deepseek">DeepSeek (默认，推荐)</option>
+            <option value="openai">OpenAI (兼容格式)</option>
+          </select>
+        </div>
+
+        <div class="modern-input-group" id="customUrlGroup" style="display: none; margin-left: 0;">
+          <label class="title" style="font-weight:600; margin-bottom: 4px;" for="aiBaseUrl">自定义接口地址 (Base URL)</label>
+          <input type="url" id="aiBaseUrl" placeholder="例如: https://api.deepseek.com/v1">
+        </div>
+
+        <div class="modern-input-group" style="margin-left: 0;">
+          <label class="title" style="font-weight:600; margin-bottom: 4px;" for="aiApiKey">API Key</label>
+          <input type="password" id="aiApiKey" placeholder="输入您的 API Key">
+          <p class="desc" id="deepseekHelp" style="font-size:13px; color:var(--text-secondary); margin-top:4px;">
+            没有 Key？<a href="https://platform.deepseek.com/" target="_blank">点击前往 DeepSeek 开放平台免费申请</a>。
+          </p>
+        </div>
+
+        <div class="modern-input-group" style="margin-left: 0;">
+          <label class="title" style="font-weight:600; margin-bottom: 4px;" for="aiPinCode">安全加密 PIN 码</label>
+          <input type="password" id="aiPinCode" placeholder="设置一个4位数PIN码用于加密您的 API Key" maxlength="4">
+          <p class="desc" style="font-size:13px; color:var(--text-secondary); margin-top:4px;">您的 API Key 将通过此 PIN 码加密并仅存储在本地。每次重启浏览器需要输入此 PIN 解锁。</p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="separator" />
+
     <section class="section-block">
       <h3>显示</h3>
       <div class="control-group">
@@ -374,6 +411,8 @@
   </div>
 
   <script src="constants.js"></script>
+  <script src="adapters/storage.js"></script>
+  <script src="adapters/crypto.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

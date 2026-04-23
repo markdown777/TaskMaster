@@ -157,7 +157,7 @@ function updateDataStats() {
 }
 
 // 加载设置
-function loadSettings() {
+async function loadSettings() {
   chrome.storage.sync.get(['settings'], (result) => {
     const settings = { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
     
@@ -183,10 +183,54 @@ function loadSettings() {
     // 更新数据统计
     updateDataStats();
   });
+
+  const aiConfig = await window.storageAdapter.get('AI_CONFIG') || { provider: 'deepseek', baseUrl: '' };
+  document.getElementById('aiProvider').value = aiConfig.provider || 'deepseek';
+  document.getElementById('aiBaseUrl').value = aiConfig.baseUrl || '';
+  
+  if (aiConfig.hasKey) {
+    document.getElementById('aiApiKey').placeholder = '已配置 (已加密，请重新输入更新)';
+  }
+
+  toggleAiProvider();
 }
 
 // 保存设置
-function saveSettings() {
+async function saveSettings() {
+  const provider = document.getElementById('aiProvider').value;
+  const baseUrl = document.getElementById('aiBaseUrl').value;
+  const apiKey = document.getElementById('aiApiKey').value;
+  const pinCode = document.getElementById('aiPinCode').value;
+
+  const aiConfig = {
+    provider: provider,
+    baseUrl: baseUrl
+  };
+
+  // Encrypt and save API key if provided
+  if (apiKey && pinCode) {
+    if (pinCode.length < 4) {
+      showMessage('PIN 码必须至少4位', 'error');
+      return;
+    }
+    try {
+      const encryptedKey = await window.cryptoAdapter.encrypt(apiKey, pinCode);
+      await window.storageAdapter.set('AI_ENCRYPTED_KEY', encryptedKey);
+      
+      // We also store a flag indicating a key is configured
+      aiConfig.hasKey = true;
+    } catch (e) {
+      console.error("Encryption failed", e);
+      showMessage('加密 API Key 失败，请重试。', 'error');
+      return;
+    }
+  } else if (apiKey && !pinCode) {
+    showMessage('请输入 PIN 码以加密 API Key', 'error');
+    return;
+  }
+
+  await window.storageAdapter.set('AI_CONFIG', aiConfig);
+
   const settings = {
     // 安全设置
     enableEncryption: document.getElementById('enableEncryption').checked,
@@ -218,6 +262,12 @@ function saveSettings() {
       showMessage('设置保存失败：' + chrome.runtime.lastError.message, 'error');
     } else {
       showMessage('设置保存成功！');
+      
+      const saveBtn = document.getElementById('saveSettings');
+      saveBtn.textContent = '保存成功！';
+      setTimeout(() => {
+        saveBtn.textContent = '保存设置';
+      }, 2000);
       
       // 如果启用了加密，重新加密所有任务数据
       if (settings.enableEncryption && settings.encryptionKey) {
@@ -268,6 +318,21 @@ async function encryptAllTasks(key) {
 function toggleEncryptionOptions(show) {
   const options = document.getElementById('encryptionOptions');
   options.style.display = show ? 'block' : 'none';
+}
+
+// 切换AI提供商选项显示
+function toggleAiProvider() {
+  const provider = document.getElementById('aiProvider').value;
+  const customUrlGroup = document.getElementById('customUrlGroup');
+  const deepseekHelp = document.getElementById('deepseekHelp');
+  
+  if (provider === 'openai') {
+    customUrlGroup.style.display = 'block';
+    deepseekHelp.style.display = 'none';
+  } else {
+    customUrlGroup.style.display = 'none';
+    deepseekHelp.style.display = 'block';
+  }
 }
 
 // 重置设置
@@ -474,6 +539,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('enableEncryption').addEventListener('change', (e) => {
     toggleEncryptionOptions(e.target.checked);
   });
+
+  // AI 助理配置选项切换
+  document.getElementById('aiProvider').addEventListener('change', toggleAiProvider);
   
   // 事件监听器
   document.getElementById('saveSettings').addEventListener('click', saveSettings);
