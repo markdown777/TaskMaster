@@ -18,6 +18,11 @@ TaskMaster 是一款基于现代极简设计美学构建的高级待办管理扩
   <img src="https://raw.githubusercontent.com/markdown777/TaskMaster/refs/heads/main/%E8%AE%BE%E7%BD%AE%E6%BC%94%E7%A4%BA%E5%9B%BE%E7%89%87.png" alt="TaskMaster 设置演示" width="48%">
 </p>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/markdown777/TaskMaster/refs/heads/main/AI%E6%A8%A1%E5%BC%8F%E6%94%AF%E6%8C%81%E8%87%AA%E7%84%B6%E8%AF%AD%E8%A8%80%E5%92%8C%E5%9B%BE%E7%89%87%E7%B2%98%E8%B4%B4.png" alt="AI模式支持自然语言和图片粘贴" width="48%">
+  <img src="https://raw.githubusercontent.com/markdown777/TaskMaster/refs/heads/main/AI%E6%A8%A1%E5%BC%8F%E9%85%8D%E7%BD%AE.png" alt="AI模式配置" width="48%">
+</p>
+
 ## 安装说明
 
 开发者本地安装：
