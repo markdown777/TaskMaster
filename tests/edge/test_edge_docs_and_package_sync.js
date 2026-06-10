@@ -27,6 +27,7 @@ const readmeEdge = read(path.join(edgeDir, 'README-EDGE.md'));
 const readme = read(path.join(edgeDir, 'README.md'));
 const summary = read(path.join(edgeDir, 'EDGE-VERSION-SUMMARY.md'));
 const guide = read(path.join(edgeDir, 'EDGE-STORE-SUBMISSION-GUIDE.md'));
+const certificationNotes = read(path.join(edgeDir, 'NOTES_FOR_CERTIFICATION.txt'));
 
 for (const token of [
   '"constants.js"',
@@ -45,10 +46,13 @@ expect(ps1, 'TaskMaster-Edge-v3.5.0.zip', 'package-edge.ps1');
 for (const doc of [
   [readmeEdge, '3.5.0', 'README-EDGE.md'],
   [readmeEdge, 'AI', 'README-EDGE.md'],
+  [readmeEdge, '默认关闭', 'README-EDGE.md'],
   [readme, '3.5.0', 'README.md'],
   [summary, '3.5.0', 'EDGE-VERSION-SUMMARY.md'],
   [guide, 'TaskMaster-Edge-v3.5.0.zip', 'EDGE-STORE-SUBMISSION-GUIDE.md'],
-  [guide, 'AI', 'EDGE-STORE-SUBMISSION-GUIDE.md']
+  [guide, 'AI', 'EDGE-STORE-SUBMISSION-GUIDE.md'],
+  [guide, '默认关闭', 'EDGE-STORE-SUBMISSION-GUIDE.md'],
+  [certificationNotes, 'default and only syncs after the user manually enables it', 'NOTES_FOR_CERTIFICATION.txt']
 ]) {
   expect(doc[0], doc[1], doc[2]);
 }

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp -f adapters/crypto.js edge-version/adapters/crypto.js)",
+      "Bash(cp -f popup.js edge-version/popup.js)",
+      "Bash(cp -f options.js edge-version/options.js)",
+      "Bash(cp -f utils.js edge-version/utils.js)"
+    ]
+  }
+}

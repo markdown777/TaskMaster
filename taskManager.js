@@ -8,6 +8,9 @@
 class TaskManager {
   constructor() {
     this.tasks = [];
+    this._writeTimer = null;
+    this._pendingSave = null;
+    this._isSaving = false;
     this.loadTasks();
   }
 
@@ -59,18 +62,48 @@ class TaskManager {
   }
 
   /**
-   * 保存任务数据
+   * 保存任务数据（带合并机制）
    * @param {Array} tasks - 任务数组
    * @returns {Promise<boolean>} 保存是否成功
    */
   async saveTasks(tasks) {
+    this.tasks = tasks;
+
+    // 清除之前的定时器
+    if (this._writeTimer) {
+      clearTimeout(this._writeTimer);
+    }
+
+    // 保存最新状态
+    this._pendingSave = [...tasks];
+
+    // 返回 Promise，延迟 500ms 执行批量写入
+    return new Promise((resolve, reject) => {
+      this._writeTimer = setTimeout(() => {
+        this._flushWrite().then(resolve).catch(reject);
+      }, 500);
+    });
+  }
+
+  /**
+   * 实际执行写入操作
+   */
+  async _flushWrite() {
+    if (this._isSaving || !this._pendingSave) {
+      return true;
+    }
+
+    this._isSaving = true;
+    const tasks = this._pendingSave;
+    this._pendingSave = null;
+
     return new Promise((resolve, reject) => {
       chrome.storage.local.set({ tasks }, () => {
+        this._isSaving = false;
         if (chrome.runtime && chrome.runtime.lastError) {
           console.error('保存任务失败:', chrome.runtime.lastError);
           reject(chrome.runtime.lastError);
         } else {
-          this.tasks = tasks;
           // 同时将核心数据同步到云端
           this.syncCoreDataToCloud(tasks);
           resolve(true);

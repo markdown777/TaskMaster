@@ -15,40 +15,9 @@ let searchState = {
 const taskManager = new TaskManager();
 const shareManager = new ShareManager();
 
-// 解密函数，和 options.js 中的保持一致以确保互通
-async function decryptText(encryptedText, key) {
-  if (!key || !encryptedText) return encryptedText;
-  try {
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-    const combined = new Uint8Array([...atob(encryptedText)].map(c => c.charCodeAt(0)));
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
-    
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw', encoder.encode(key), { name: 'PBKDF2' }, false, ['deriveKey']
-    );
-    
-    const cryptoKey = await crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: encoder.encode('taskmaster-salt'),
-        iterations: 100000,
-        hash: 'SHA-256'
-      },
-      keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
-    );
-    
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: iv }, cryptoKey, encrypted
-    );
-    
-    return decoder.decode(decrypted);
-  } catch (error) {
-    console.error('解密失败:', error);
-    return null; // 这里需要返回 null 以便触发报错
-  }
-}
+// 渲染缓存
+let _lastRenderedTasksHash = '';
+let _lastRenderedHtml = '';
 
 // 全局状态变量
 let isAiMode = false;
@@ -170,8 +139,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (aiConfig.enableEncryption) {
         const encryptedKey = await window.storageAdapter.get('AI_ENCRYPTED_KEY');
         if (encryptedKey) {
-          const decryptedKey = await decryptText(encryptedKey, pin);
-          if (decryptedKey && decryptedKey !== encryptedKey) {
+          const decryptedKey = await window.cryptoAdapter.decrypt(encryptedKey, pin);
+          if (decryptedKey) {
             if (chrome.storage && chrome.storage.session) {
               await chrome.storage.session.set({ 'AI_DECRYPTED_KEY': decryptedKey });
             } else {
@@ -186,8 +155,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (visionConfig.enableEncryption) {
         const encryptedKey = await window.storageAdapter.get('VISION_ENCRYPTED_KEY');
         if (encryptedKey) {
-          const decryptedKey = await decryptText(encryptedKey, pin);
-          if (decryptedKey && decryptedKey !== encryptedKey) {
+          const decryptedKey = await window.cryptoAdapter.decrypt(encryptedKey, pin);
+          if (decryptedKey) {
             if (chrome.storage && chrome.storage.session) {
               await chrome.storage.session.set({ 'VISION_DECRYPTED_KEY': decryptedKey });
             } else {
@@ -199,7 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (!anyDecrypted) {
-        throw new Error("解密失败或 PIN 码错误");
+        throw new Error("认证失败，请检查 PIN 码");
       }
       
       pinModal.hidden = true;

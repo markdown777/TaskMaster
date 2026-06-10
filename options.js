@@ -15,103 +15,6 @@ const DEFAULT_SETTINGS = {
   soundNotifications: false
 };
 
-// 导入加密/解密函数
-// 注意：由于options.js在不同环境中运行，这里保留本地实现作为备份
-async function encryptText(text, key) {
-  if (!key || !text) return text;
-  
-  try {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(text);
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    
-    // 派生密钥
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(key),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
-    );
-    
-    const cryptoKey = await crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: encoder.encode('taskmaster-salt'),
-        iterations: 100000,
-        hash: 'SHA-256'
-      },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt']
-    );
-    
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv },
-      cryptoKey,
-      data
-    );
-    
-    // 将iv和密文组合并编码
-    const combined = new Uint8Array(iv.length + encrypted.byteLength);
-    combined.set(iv, 0);
-    combined.set(new Uint8Array(encrypted), iv.length);
-    
-    return btoa(String.fromCharCode(...combined));
-  } catch (error) {
-    console.error('加密失败:', error);
-    return text;
-  }
-}
-
-async function decryptText(encryptedText, key) {
-  if (!key || !encryptedText) return encryptedText;
-  
-  try {
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-    
-    // 解码base64并分离iv和密文
-    const combined = new Uint8Array([...atob(encryptedText)].map(c => c.charCodeAt(0)));
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
-    
-    // 派生密钥
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(key),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
-    );
-    
-    const cryptoKey = await crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: encoder.encode('taskmaster-salt'),
-        iterations: 100000,
-        hash: 'SHA-256'
-      },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['decrypt']
-    );
-    
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: iv },
-      cryptoKey,
-      encrypted
-    );
-    
-    return decoder.decode(decrypted);
-  } catch (error) {
-    console.error('解密失败:', error);
-    return encryptedText;
-  }
-}
-
 // 显示状态消息
 function showMessage(text, type = 'success') {
   // 创建消息元素
@@ -227,8 +130,7 @@ async function saveSettings() {
         return;
       }
       try {
-        // 使用 options.js 本地提供的 encryptText 确保加密成功
-        const encryptedKey = await encryptText(apiKey, pinCode);
+        const encryptedKey = await window.cryptoAdapter.encrypt(apiKey, pinCode);
         if (!encryptedKey || encryptedKey === apiKey) {
           throw new Error('加密失败，返回了明文');
         }
@@ -257,7 +159,7 @@ async function saveSettings() {
           return;
         }
         try {
-          const encryptedKey = await encryptText(plainKey, pinCode);
+          const encryptedKey = await window.cryptoAdapter.encrypt(plainKey, pinCode);
           if (!encryptedKey || encryptedKey === plainKey) {
             throw new Error('加密失败，返回了明文');
           }
@@ -274,9 +176,9 @@ async function saveSettings() {
         const existingEncrypted = await window.storageAdapter.get('AI_ENCRYPTED_KEY');
         if (existingEncrypted) {
           if (pinCode) {
-            const decryptedKey = await decryptText(existingEncrypted, pinCode);
-            if (!decryptedKey || decryptedKey === existingEncrypted) {
-              showMessage('PIN 码不匹配。如需更换 PIN，请重新输入 API Key。', 'error');
+            const decryptedKey = await window.cryptoAdapter.decrypt(existingEncrypted, pinCode);
+            if (!decryptedKey) {
+              showMessage('认证失败，请检查 PIN 码', 'error');
               return;
             }
           }
@@ -313,7 +215,7 @@ async function saveSettings() {
           return;
         }
         try {
-          const encryptedKey = await encryptText(visionApiKey, pinCode);
+          const encryptedKey = await window.cryptoAdapter.encrypt(visionApiKey, pinCode);
           if (!encryptedKey || encryptedKey === visionApiKey) {
             throw new Error('加密失败，返回了明文');
           }
@@ -340,7 +242,7 @@ async function saveSettings() {
             return;
           }
           try {
-            const encryptedKey = await encryptText(plainVisionKey, pinCode);
+            const encryptedKey = await window.cryptoAdapter.encrypt(plainVisionKey, pinCode);
             if (!encryptedKey || encryptedKey === plainVisionKey) {
               throw new Error('加密失败，返回了明文');
             }
@@ -356,7 +258,7 @@ async function saveSettings() {
           const existingEncrypted = await window.storageAdapter.get('VISION_ENCRYPTED_KEY');
           if (existingEncrypted) {
             if (pinCode) {
-              const decryptedKey = await decryptText(existingEncrypted, pinCode);
+              const decryptedKey = await window.cryptoAdapter.decrypt(existingEncrypted, pinCode);
               if (!decryptedKey || decryptedKey === existingEncrypted) {
                 showMessage('PIN 码不匹配。如需更换 PIN，请重新输入 Vision API Key。', 'error');
                 return;
@@ -435,8 +337,8 @@ async function encryptAllTasks(key) {
     // 异步加密每个任务
     const encryptedTasks = await Promise.all(tasks.map(async (task) => ({
       ...task,
-      text: await encryptText(task.text, key),
-      notes: task.notes ? await encryptText(task.notes, key) : task.notes
+      text: await window.cryptoAdapter.encrypt(task.text, key),
+      notes: task.notes ? await window.cryptoAdapter.encrypt(task.notes, key) : task.notes
     })));
     
     await new Promise((resolve, reject) => {
@@ -558,8 +460,8 @@ function exportData() {
         try {
           exportTasks = await Promise.all(tasks.map(async task => ({
             ...task,
-            text: await decryptText(task.text, settings.encryptionKey),
-            notes: task.notes ? await decryptText(task.notes, settings.encryptionKey) : task.notes
+            text: await window.cryptoAdapter.decrypt(task.text, settings.encryptionKey),
+            notes: task.notes ? await window.cryptoAdapter.decrypt(task.notes, settings.encryptionKey) : task.notes
           })));
         } catch (error) {
           console.error('解密导出数据失败:', error);
@@ -631,8 +533,8 @@ function handleFileImport(event) {
           try {
             finalTasks = await Promise.all(tasks.map(async task => ({
               ...task,
-              text: await encryptText(task.text, settings.encryptionKey),
-              notes: task.notes ? await encryptText(task.notes, settings.encryptionKey) : task.notes
+              text: await window.cryptoAdapter.encrypt(task.text, settings.encryptionKey),
+              notes: task.notes ? await window.cryptoAdapter.encrypt(task.notes, settings.encryptionKey) : task.notes
             })));
           } catch (error) {
             console.error('加密导入数据失败:', error);

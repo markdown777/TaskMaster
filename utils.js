@@ -108,113 +108,6 @@ async function copyToClipboard(text) {
 }
 
 /**
- * 加密文本（使用Web Crypto API）
- * @param {string} text - 要加密的文本
- * @param {string} key - 加密密钥
- * @returns {Promise<string>} 加密后的文本
- */
-async function encryptText(text, key) {
-  if (!key || !text) return text;
-  
-  try {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(text);
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    
-    // 派生密钥
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(key),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
-    );
-    
-    const cryptoKey = await crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: encoder.encode('taskmaster-salt'),
-        iterations: 100000,
-        hash: 'SHA-256'
-      },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt']
-    );
-    
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv },
-      cryptoKey,
-      data
-    );
-    
-    // 将iv和密文组合并编码
-    const combined = new Uint8Array(iv.length + encrypted.byteLength);
-    combined.set(iv, 0);
-    combined.set(new Uint8Array(encrypted), iv.length);
-    
-    return btoa(String.fromCharCode(...combined));
-  } catch (error) {
-    console.error('加密失败:', error);
-    return text;
-  }
-}
-
-/**
- * 解密文本（使用Web Crypto API）
- * @param {string} encryptedText - 加密的文本
- * @param {string} key - 解密密钥
- * @returns {Promise<string>} 解密后的文本
- */
-async function decryptText(encryptedText, key) {
-  if (!key || !encryptedText) return encryptedText;
-  
-  try {
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-    
-    // 解码base64并分离iv和密文
-    const combined = new Uint8Array([...atob(encryptedText)].map(c => c.charCodeAt(0)));
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
-    
-    // 派生密钥
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(key),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
-    );
-    
-    const cryptoKey = await crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: encoder.encode('taskmaster-salt'),
-        iterations: 100000,
-        hash: 'SHA-256'
-      },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['decrypt']
-    );
-    
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: iv },
-      cryptoKey,
-      encrypted
-    );
-    
-    return decoder.decode(decrypted);
-  } catch (error) {
-    console.error('解密失败:', error);
-    return encryptedText;
-  }
-}
-
-/**
  * 验证输入是否安全
  * @param {string} input - 要验证的输入
  * @returns {boolean} 是否安全
@@ -301,8 +194,6 @@ if (typeof module !== 'undefined' && module.exports) {
     debounce,
     throttle,
     copyToClipboard,
-    encryptText,
-    decryptText,
     validateInput,
     formatDateTime,
     formatDate,
