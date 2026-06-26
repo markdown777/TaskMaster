@@ -4,7 +4,9 @@
       "Bash(cp -f adapters/crypto.js edge-version/adapters/crypto.js)",
       "Bash(cp -f popup.js edge-version/popup.js)",
       "Bash(cp -f options.js edge-version/options.js)",
-      "Bash(cp -f utils.js edge-version/utils.js)"
+      "Bash(cp -f utils.js edge-version/utils.js)",
+      "Bash(cp -f \"/Users/heyongchen/工作/chromeplus v3.0.0/taskManager.js\" \"/Users/heyongchen/工作/chromeplus v3.0.0/edge-version/taskManager.js\")",
+      "Bash(cp -f \"/Users/heyongchen/工作/chromeplus v3.0.0/popup.js\" \"/Users/heyongchen/工作/chromeplus v3.0.0/edge-version/popup.js\")"
     ]
   }
 }
