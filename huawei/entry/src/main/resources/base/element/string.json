@@ -1,0 +1,10 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "TaskMaster 主模块" },
+    { "name": "entry_ability_desc", "value": "TaskMaster 入口" },
+    { "name": "reason_internet", "value": "用于调用 AI 大模型接口解析任务" },
+    { "name": "reason_network_info", "value": "检测网络状态以调用 AI 接口" },
+    { "name": "reason_reminder", "value": "用于任务到期时弹出提醒通知" },
+    { "name": "reason_notification", "value": "用于显示任务添加与到期通知" }
+  ]
+}

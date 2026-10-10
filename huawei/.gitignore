@@ -1,0 +1,12 @@
+/node_modules
+/oh_modules
+/.hvigor
+/.cxx
+/.test
+/build
+/.preview
+local.properties
+*.hap
+*.hsp
+*.app
+/.idea

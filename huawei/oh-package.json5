@@ -1,0 +1,10 @@
+{
+  "modelVersion": "5.0.0",
+  "description": "TaskMaster HarmonyOS app — AI-powered task assistant.",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.21",
+    "@ohos/hvigor-ohos-plugin": "4.0.2",
+    "@ohos/hvigor": "4.0.2"
+  }
+}

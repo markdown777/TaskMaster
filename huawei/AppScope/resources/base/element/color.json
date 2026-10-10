@@ -1,0 +1,15 @@
+{
+  "color": [
+    { "name": "bg_primary", "value": "#FFFFFF" },
+    { "name": "bg_secondary", "value": "#F9F9F9" },
+    { "name": "text_primary", "value": "#111111" },
+    { "name": "text_secondary", "value": "#888888" },
+    { "name": "border_light", "value": "#14" },
+    { "name": "brand_color", "value": "#111111" },
+    { "name": "danger", "value": "#FF4444" },
+    { "name": "priority_high", "value": "#FF4444" },
+    { "name": "priority_medium", "value": "#F5A623" },
+    { "name": "priority_low", "value": "#34C759" },
+    { "name": "pin_glow", "value": "#FFE066" }
+  ]
+}
