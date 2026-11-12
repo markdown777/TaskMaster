@@ -253,6 +253,60 @@ function formatDueButtonLabel(dueValue, now = new Date()) {
   return formatDueShort(dueValue, now) || '时间';
 }
 
+/**
+ * 将 Date 转成 datetime-local 可用的本地时间字符串
+ * @param {Date} date - 日期对象
+ * @returns {string} yyyy-MM-ddTHH:mm
+ */
+function toDatetimeLocalValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const mm = pad(date.getMonth() + 1);
+  const dd = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const min = pad(date.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+/**
+ * 计算截止时间快捷预设
+ * @param {string} preset - plus60 / today18 / tomorrow12 / plus1d / plus1w
+ * @param {Date} now - 当前时间
+ * @returns {Date|null} 目标时间，未知预设返回 null
+ */
+function computeDuePreset(preset, now = new Date()) {
+  if (preset === 'plus60') {
+    return new Date(now.getTime() + 60 * 60 * 1000);
+  }
+
+  const target = new Date(now);
+  if (preset === 'plus1d') {
+    target.setDate(target.getDate() + 1);
+    return target;
+  }
+
+  if (preset === 'plus1w') {
+    target.setDate(target.getDate() + 7);
+    return target;
+  }
+
+  if (preset === 'today18') {
+    target.setHours(18, 0, 0, 0);
+    if (target.getTime() <= now.getTime()) {
+      target.setDate(target.getDate() + 1);
+    }
+    return target;
+  }
+
+  if (preset === 'tomorrow12') {
+    target.setDate(target.getDate() + 1);
+    target.setHours(12, 0, 0, 0);
+    return target;
+  }
+
+  return null;
+}
+
 // 导出工具函数
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -271,6 +325,8 @@ if (typeof module !== 'undefined' && module.exports) {
     isSameDay,
     isOverdue,
     formatDueShort,
-    formatDueButtonLabel
+    formatDueButtonLabel,
+    toDatetimeLocalValue,
+    computeDuePreset
   };
 }

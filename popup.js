@@ -560,50 +560,6 @@ function initializeSearchEvents() {
 }
 
 /**
- * 将 Date 转成 datetime-local 可用的本地时间字符串
- * @param {Date} date - 日期对象
- * @returns {string} yyyy-MM-ddTHH:mm
- */
-function toDatetimeLocalValue(date) {
-  const pad = (n) => String(n).padStart(2, '0');
-  const yyyy = date.getFullYear();
-  const mm = pad(date.getMonth() + 1);
-  const dd = pad(date.getDate());
-  const hh = pad(date.getHours());
-  const min = pad(date.getMinutes());
-  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-}
-
-/**
- * 计算截止时间快捷预设
- * @param {string} preset - plus60 / today18 / tomorrow09
- * @param {Date} now - 当前时间
- * @returns {Date|null} 目标时间，未知预设返回 null
- */
-function computeDuePreset(preset, now = new Date()) {
-  if (preset === 'plus60') {
-    return new Date(now.getTime() + 60 * 60 * 1000);
-  }
-
-  const target = new Date(now);
-  if (preset === 'today18') {
-    target.setHours(18, 0, 0, 0);
-    if (target.getTime() <= now.getTime()) {
-      target.setDate(target.getDate() + 1);
-    }
-    return target;
-  }
-
-  if (preset === 'tomorrow09') {
-    target.setDate(target.getDate() + 1);
-    target.setHours(9, 0, 0, 0);
-    return target;
-  }
-
-  return null;
-}
-
-/**
  * 初始化截止时间弹层选择器
  * 通过一个紧凑按钮触发时间选择，减少表单区域的视觉复杂度
  * 弹层内的选择是“草稿”：确定后才写回按钮，取消/点外部/Esc 恢复原值
@@ -632,6 +588,10 @@ function initializeDuePicker(dueButton, duePopover, duePopoverClose, duePopoverC
    */
   function openPopover() {
     appliedValue = taskDueInput.value;
+    // 未选过时间时预填当前时间，方便直接微调后创建
+    if (!taskDueInput.value) {
+      taskDueInput.value = toDatetimeLocalValue(new Date());
+    }
     duePopover.hidden = false;
     dueButton.dataset.active = 'true';
     // 移除自动调用 showPicker，因为会让系统自带的和自定义弹窗同时出现
@@ -758,7 +718,7 @@ function ensureTaskDueEditor() {
     <div class="due-quick-row">
       <button type="button" class="due-quick" data-preset="plus60">1 小时后</button>
       <button type="button" class="due-quick" data-preset="today18">今天 18:00</button>
-      <button type="button" class="due-quick" data-preset="tomorrow09">明天 09:00</button>
+      <button type="button" class="due-quick" data-preset="tomorrow12">明天 12:00</button>
     </div>
     <div class="task-due-custom-row">
       <input type="datetime-local" class="task-due-input" aria-label="自定义截止时间">
@@ -900,7 +860,7 @@ async function postponeOverdueTasks() {
   target.setHours(18, 0, 0, 0);
   if (target.getTime() <= now.getTime()) {
     target.setDate(target.getDate() + 1);
-    target.setHours(9, 0, 0, 0);
+    target.setHours(12, 0, 0, 0);
   }
 
   try {
@@ -1101,7 +1061,7 @@ async function renderTasks() {
       html += `<div class="overdue-section">
                 <div class="section-title overdue-title">
                   <span>逾期 · ${overdueTasks.length}</span>
-                  <button type="button" class="overdue-postpone-btn" title="顺延到最近的可执行时间（今天 18:00 或明天 09:00）">全部顺延</button>
+                  <button type="button" class="overdue-postpone-btn" title="顺延到最近的可执行时间（今天 18:00 或明天 12:00）">全部顺延</button>
                 </div>
                 <ul>`;
       overdueTasks.sort(sortByDueAsc).forEach(task => {
