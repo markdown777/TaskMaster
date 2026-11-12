@@ -199,6 +199,19 @@
       border-color: #ff4444;
     }
 
+    .notification-test {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .notification-test .action-btn {
+      padding: 8px 16px;
+      font-size: 12px;
+    }
+
     .save-btn {
       background: var(--brand-color);
       color: var(--bg-primary);
@@ -461,6 +474,10 @@
             <span class="desc">通知出现时播放提示音</span>
           </div>
         </label>
+        <div class="notification-test">
+          <button id="testNotification" class="action-btn" type="button">发送测试提醒</button>
+          <span class="desc">立即发一条系统通知，用来确认系统通知权限是否开启</span>
+        </div>
       </div>
     </section>
 

@@ -635,6 +635,30 @@ function restoreFromBackupKey(key) {
   }
 }
 
+/**
+ * 发送一条测试通知，用于确认系统通知权限是否开启
+ */
+function sendTestNotification() {
+  if (!document.getElementById('enableNotifications').checked) {
+    showMessage('请先勾选「启用通知提醒」，否则到期提醒不会发送', 'error');
+    return;
+  }
+
+  chrome.notifications.create(`taskmaster-test-${Date.now()}`, {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: 'TaskMaster 测试提醒',
+    message: '如果你看到这条通知，说明系统通知权限已开启。',
+    silent: !document.getElementById('soundNotifications').checked
+  }, () => {
+    if (chrome.runtime && chrome.runtime.lastError) {
+      showMessage('测试通知发送失败：' + chrome.runtime.lastError.message, 'error');
+      return;
+    }
+    showMessage('测试通知已发送，若未看到请检查系统通知设置');
+  });
+}
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
   // 加载设置
@@ -707,6 +731,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('importFile').addEventListener('change', handleFileImport);
   document.getElementById('clearAllData').addEventListener('click', clearAllData);
   document.getElementById('showBackupsBtn')?.addEventListener('click', showBackupList);
+  document.getElementById('testNotification')?.addEventListener('click', sendTestNotification);
 
   // MV3 禁止内联 onclick，备份恢复使用事件委托
   document.getElementById('dataStats').addEventListener('click', (e) => {
