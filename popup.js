@@ -383,8 +383,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // 增强存储回调验证
   if (chrome.storage) {
     chrome.storage.onChanged.addListener((changes) => {
-      console.log('[DEBUG] 存储变更:', changes);
-      if (changes.tasks) renderTasks();
+      if (!changes.tasks) return;
+
+      // 本地写入尚未完成时，忽略自己触发的旧快照，避免缓存回退
+      if (!taskManager.isSaving() && changes.tasks.newValue) {
+        taskManager.syncFromStorage(changes.tasks.newValue);
+      }
+      renderTasks();
     });
   } else {
     console.error('Chrome storage API不可用');
@@ -505,13 +510,14 @@ document.addEventListener('DOMContentLoaded', () => {
    * 日期标题点击事件 - 展开/折叠任务组
    */
   document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('date-header')) {
-      const header = e.target;
-      const content = header.nextElementSibling;
-      const isExpanded = content.style.display !== 'none';
-      content.style.display = isExpanded ? 'none' : 'block';
-      header.querySelector('.toggle-icon').textContent = isExpanded ? '▶' : '▼';
-    }
+    const header = e.target.closest('.date-header');
+    if (!header) return;
+    const content = header.nextElementSibling;
+    if (!content) return;
+    const isExpanded = content.style.display !== 'none';
+    content.style.display = isExpanded ? 'none' : 'block';
+    const icon = header.querySelector('.toggle-icon');
+    if (icon) icon.textContent = isExpanded ? '▶' : '▼';
   });
   
   // 初始化任务列表事件委托（仅执行一次）
@@ -561,6 +567,50 @@ function initializeSearchEvents() {
 }
 
 /**
+ * 将 Date 转成 datetime-local 可用的本地时间字符串
+ * @param {Date} date - 日期对象
+ * @returns {string} yyyy-MM-ddTHH:mm
+ */
+function toDatetimeLocalValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const mm = pad(date.getMonth() + 1);
+  const dd = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const min = pad(date.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+/**
+ * 计算截止时间快捷预设
+ * @param {string} preset - plus60 / today18 / tomorrow09
+ * @param {Date} now - 当前时间
+ * @returns {Date|null} 目标时间，未知预设返回 null
+ */
+function computeDuePreset(preset, now = new Date()) {
+  if (preset === 'plus60') {
+    return new Date(now.getTime() + 60 * 60 * 1000);
+  }
+
+  const target = new Date(now);
+  if (preset === 'today18') {
+    target.setHours(18, 0, 0, 0);
+    if (target.getTime() <= now.getTime()) {
+      target.setDate(target.getDate() + 1);
+    }
+    return target;
+  }
+
+  if (preset === 'tomorrow09') {
+    target.setDate(target.getDate() + 1);
+    target.setHours(9, 0, 0, 0);
+    return target;
+  }
+
+  return null;
+}
+
+/**
  * 初始化截止时间弹层选择器
  * 通过一个紧凑按钮触发时间选择，减少表单区域的视觉复杂度
  * @param {HTMLButtonElement|null} dueButton - 触发按钮
@@ -570,21 +620,6 @@ function initializeSearchEvents() {
  */
 function initializeDuePicker(dueButton, duePopover, duePopoverClose, taskDueInput) {
   if (!dueButton || !duePopover || !taskDueInput) return;
-
-  /**
-   * 将 Date 转成 datetime-local 可用的本地时间字符串
-   * @param {Date} date - 日期对象
-   * @returns {string} yyyy-MM-ddTHH:mm
-   */
-  function toDatetimeLocalValue(date) {
-    const pad = (n) => String(n).padStart(2, '0');
-    const yyyy = date.getFullYear();
-    const mm = pad(date.getMonth() + 1);
-    const dd = pad(date.getDate());
-    const hh = pad(date.getHours());
-    const min = pad(date.getMinutes());
-    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-  }
 
   /**
    * 根据当前 input 值更新按钮状态（不占用额外空间）
@@ -623,24 +658,8 @@ function initializeDuePicker(dueButton, duePopover, duePopoverClose, taskDueInpu
       return;
     }
 
-    const now = new Date();
-    let target = new Date(now);
-
-    if (preset === 'plus60') {
-      target = new Date(Date.now() + 60 * 60 * 1000);
-    }
-
-    if (preset === 'today18') {
-      target.setHours(18, 0, 0, 0);
-      if (target.getTime() < now.getTime()) {
-        target.setDate(target.getDate() + 1);
-      }
-    }
-
-    if (preset === 'tomorrow09') {
-      target.setDate(target.getDate() + 1);
-      target.setHours(9, 0, 0, 0);
-    }
+    const target = computeDuePreset(preset);
+    if (!target) return;
 
     taskDueInput.value = toDatetimeLocalValue(target);
     syncButtonState(taskDueInput.value);
@@ -709,6 +728,174 @@ function updateDueButtonState(dueButton, dueValue) {
   dueButton.title = `截止：${label}`;
 }
 
+// —— 已有任务的截止时间快捷修改 ——
+let taskDueEditor = null;
+
+function ensureTaskDueEditor() {
+  if (taskDueEditor) return taskDueEditor;
+
+  const editor = document.createElement('div');
+  editor.className = 'task-due-popover';
+  editor.hidden = true;
+  editor.innerHTML = `
+    <div class="due-quick-row">
+      <button type="button" class="due-quick" data-preset="plus60">1 小时后</button>
+      <button type="button" class="due-quick" data-preset="today18">今天 18:00</button>
+      <button type="button" class="due-quick" data-preset="tomorrow09">明天 09:00</button>
+    </div>
+    <div class="task-due-custom-row">
+      <input type="datetime-local" class="task-due-input" aria-label="自定义截止时间">
+      <button type="button" class="task-due-save">保存</button>
+    </div>
+    <button type="button" class="due-quick task-due-clear" data-preset="clear">清除截止时间</button>`;
+
+  editor.addEventListener('click', async (e) => {
+    const taskId = Number(editor.dataset.taskId);
+    if (!taskId) return;
+
+    const presetButton = e.target.closest('[data-preset]');
+    if (presetButton) {
+      const preset = presetButton.dataset.preset;
+      if (preset === 'clear') {
+        await applyTaskDue(taskId, null);
+        return;
+      }
+      const target = computeDuePreset(preset);
+      if (target) await applyTaskDue(taskId, target);
+      return;
+    }
+
+    if (e.target.closest('.task-due-save')) {
+      const input = editor.querySelector('.task-due-input');
+      if (!input.value) {
+        input.focus();
+        return;
+      }
+      await applyTaskDue(taskId, new Date(input.value));
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (editor.hidden) return;
+    if (editor.contains(e.target) || e.target.closest('.due-chip, .due-btn')) return;
+    closeTaskDueEditor();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !editor.hidden) closeTaskDueEditor();
+  });
+
+  window.addEventListener('resize', () => {
+    if (!editor.hidden) closeTaskDueEditor();
+  });
+
+  document.body.appendChild(editor);
+
+  const taskList = document.getElementById('task-list');
+  if (taskList) {
+    // 打开瞬间可能伴随滚动事件，延迟后再响应，避免刚打开就被关闭
+    taskList.addEventListener('scroll', () => {
+      if (editor.hidden) return;
+      if (Date.now() - Number(editor.dataset.openedAt || 0) < 150) return;
+      closeTaskDueEditor();
+    }, { passive: true });
+  }
+
+  taskDueEditor = editor;
+  return editor;
+}
+
+function openTaskDueEditor(anchor, taskId, currentDue) {
+  const editor = ensureTaskDueEditor();
+  editor.dataset.taskId = String(taskId);
+  editor.dataset.openedAt = String(Date.now());
+  editor.querySelector('.task-due-input').value = currentDue
+    ? toDatetimeLocalValue(new Date(currentDue))
+    : '';
+  editor.hidden = false;
+
+  const rect = anchor.getBoundingClientRect();
+  const left = Math.min(
+    Math.max(8, rect.left),
+    Math.max(8, window.innerWidth - editor.offsetWidth - 8)
+  );
+  let top = rect.bottom + 6;
+  if (top + editor.offsetHeight > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - editor.offsetHeight - 6);
+  }
+  editor.style.left = `${Math.round(left)}px`;
+  editor.style.top = `${Math.round(top)}px`;
+
+  editor.querySelector('.due-quick').focus({ preventScroll: true });
+}
+
+function closeTaskDueEditor() {
+  if (taskDueEditor) taskDueEditor.hidden = true;
+}
+
+async function applyTaskDue(taskId, dueDate) {
+  try {
+    await taskManager.updateTask(taskId, {
+      due: dueDate ? dueDate.toISOString() : null
+    });
+    closeTaskDueEditor();
+    await renderTasks();
+    revealTaskItem(taskId);
+    showMessage(dueDate ? `截止时间已改为 ${formatDueShort(dueDate)}` : '已清除截止时间');
+  } catch (error) {
+    console.error('修改截止时间失败:', error);
+    showMessage('修改失败，请重试', 'error');
+  }
+}
+
+// 展开任务所在分组并滚动到可视区域，避免取消置顶后“看起来消失了”
+function revealTaskItem(taskId) {
+  const taskList = document.getElementById('task-list');
+  if (!taskList) return;
+
+  const item = taskList.querySelector(`.task-item[data-id="${CSS.escape(String(taskId))}"]`);
+  if (!item) return;
+
+  const content = item.closest('.date-content');
+  if (content && content.style.display === 'none') {
+    content.style.display = '';
+    const header = content.previousElementSibling;
+    const icon = header && header.querySelector('.toggle-icon');
+    if (icon) icon.textContent = '▼';
+  }
+
+  item.scrollIntoView({ block: 'nearest' });
+  item.classList.add('task-flash');
+  setTimeout(() => item.classList.remove('task-flash'), 1200);
+}
+
+// 将当前所有逾期任务顺延到最近的可执行时间
+async function postponeOverdueTasks() {
+  const tasks = await taskManager.getAllTasks();
+  const now = new Date();
+  const overdueIds = tasks
+    .filter(task => !task.completed && !task.pinned && isOverdue(task.due, now))
+    .map(task => task.id);
+
+  if (overdueIds.length === 0) return;
+
+  const target = new Date(now);
+  target.setHours(18, 0, 0, 0);
+  if (target.getTime() <= now.getTime()) {
+    target.setDate(target.getDate() + 1);
+    target.setHours(9, 0, 0, 0);
+  }
+
+  try {
+    await taskManager.setTasksDue(overdueIds, target.toISOString());
+    await renderTasks();
+    showMessage(`${overdueIds.length} 条任务已顺延至 ${formatDueShort(target)}`);
+  } catch (error) {
+    console.error('批量顺延失败:', error);
+    showMessage('顺延失败，请重试', 'error');
+  }
+}
+
 // 更新搜索状态
 function updateSearchState() {
   searchState.isSearching = searchState.query.length > 0 || 
@@ -731,9 +918,12 @@ async function performSearch() {
       showCompleted: searchState.showCompleted,
       showNotesOnly: searchState.showNotesOnly
     };
-    
-    const filteredTasks = await taskManager.searchTasks(searchState.query, filters);
-    renderSearchResults(filteredTasks);
+
+    const [filteredTasks, settings] = await Promise.all([
+      taskManager.searchTasks(searchState.query, filters),
+      taskManager.getSettings()
+    ]);
+    renderSearchResults(filteredTasks, searchState.query, settings);
   } catch (error) {
     console.error('搜索失败:', error);
     showMessage('搜索失败，请重试', 'error');
@@ -741,7 +931,7 @@ async function performSearch() {
 }
 
 // 渲染搜索结果
-function renderSearchResults(tasks) {
+function renderSearchResults(tasks, query = '', settings = {}) {
   const taskList = document.getElementById('task-list');
   if (!taskList) return;
   
@@ -760,14 +950,17 @@ function renderSearchResults(tasks) {
   const completedCount = tasks.filter(t => t.completed).length;
   const withNotesCount = tasks.filter(t => t.notes && t.notes.trim() !== '').length;
   
-  let html = `
-    <div class="search-stats">
-      搜索结果：共 ${tasks.length} 项任务
-      ${activeCount > 0 ? ` | 活动 ${activeCount} 项` : ''}
-      ${completedCount > 0 ? ` | 已完成 ${completedCount} 项` : ''}
-      ${withNotesCount > 0 ? ` | 有备注 ${withNotesCount} 项` : ''}
-    </div>
-  `;
+  let html = '';
+  if (settings.showTaskStats !== false) {
+    html += `
+      <div class="search-stats">
+        搜索结果：共 ${tasks.length} 项任务
+        ${activeCount > 0 ? ` | 活动 ${activeCount} 项` : ''}
+        ${completedCount > 0 ? ` | 已完成 ${completedCount} 项` : ''}
+        ${withNotesCount > 0 ? ` | 有备注 ${withNotesCount} 项` : ''}
+      </div>
+    `;
+  }
   
   // 按完成状态分组
   const activeTasks = tasks.filter(t => !t.completed);
@@ -779,7 +972,7 @@ function renderSearchResults(tasks) {
               <div class="search-section-title">活动任务 (${activeTasks.length})</div>
               <ul>`;
     activeTasks.forEach(task => {
-      html += generateTaskItemHtml(task);
+      html += generateTaskItemHtml(task, false, query);
     });
     html += '</ul></div>';
   }
@@ -790,7 +983,7 @@ function renderSearchResults(tasks) {
               <div class="search-section-title">已完成任务 (${completedTasks.length})</div>
               <ul>`;
     completedTasks.forEach(task => {
-      html += generateTaskItemHtml(task);
+      html += generateTaskItemHtml(task, true, query);
     });
     html += '</ul></div>';
   }
@@ -803,127 +996,195 @@ function renderSearchResults(tasks) {
 // 任务渲染功能
 async function renderTasks() {
   try {
-    const tasks = await taskManager.getAllTasks();
+    const [tasks, settings] = await Promise.all([
+      taskManager.getAllTasks(),
+      taskManager.getSettings()
+    ]);
     const taskList = document.getElementById('task-list');
-    if (taskList) {
-      // 获取今天和昨天的日期
-      const today = new Date();
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      
-      // 记录当前的折叠状态，避免重绘后丢失
-      const expandedStates = {};
-      document.querySelectorAll('.date-header').forEach(header => {
-        const date = header.dataset.date;
-        const content = header.nextElementSibling;
-        if (date && content) {
-          expandedStates[date] = content.style.display !== 'none';
-        }
-      });
-      
-      // 分离任务：置顶、活动、归档
-      const pinnedTasks = [];
-      const activeTasks = [];
-      const archivedTasks = [];
-      
-      tasks.forEach(task => {
-        if (task.completed) {
-          archivedTasks.push(task);
-        } else if (task.pinned) {
-          pinnedTasks.push(task);
-        } else {
-          activeTasks.push(task);
-        }
-      });
-      
-      let html = '';
-      
-      // 渲染置顶区域
-      if (pinnedTasks.length > 0) {
-        html += `<div class="pinned-section">
-                  <div class="section-title">置顶</div>
-                  <ul>`;
-        pinnedTasks.forEach(task => {
-          html += generateTaskItemHtml(task);
-        });
-        html += '</ul></div>';
-      }
-      
-      // 按日期分组活动任务
-      const tasksByDate = taskManager.groupTasksByDate(activeTasks);
-      
-      // 渲染日期分组
-      Object.keys(tasksByDate).sort((a, b) => new Date(b) - new Date(a)).forEach(date => {
-        const isToday = date === today.toLocaleDateString();
-        const isYesterday = date === yesterday.toLocaleDateString();
-        
-    // 优先使用用户之前的折叠状态，没有则使用默认逻辑（展开今天和昨天）
-    let shouldExpand;
-    if (expandedStates[date] !== undefined) {
-      shouldExpand = expandedStates[date];
-    } else {
-      shouldExpand = isToday || isYesterday;
-    }
-    
-    html += `<div class="date-section">
-              <div class="date-header" data-date="${date}">
-                ${date} 
-                <span class="toggle-icon">${shouldExpand ? '▼' : '▶'}</span>
-              </div>
-              <div class="date-content" style="${shouldExpand ? '' : 'display:none'}">
-                <ul>`;
-        
-        tasksByDate[date].forEach(task => {
-          html += generateTaskItemHtml(task);
-        });
-        
-        html += `</ul></div></div>`;
-      });
-      
-      // 渲染归档区域
-      if (archivedTasks.length > 0) {
-        // 对归档任务按完成时间或创建时间倒序排序
-        archivedTasks.sort((a, b) => new Date(b.completedAt || b.createdAt || 0) - new Date(a.completedAt || a.createdAt || 0));
-        
-        const recentArchived = archivedTasks.slice(0, 6); // 修改为展示最新 6 条
-        const foldedArchived = archivedTasks.slice(6);
-        
-        let shouldExpandArchive = expandedStates['archive-folded'] === true;
+    if (!taskList) return;
 
-        html += `<div class="archive-section">
-                  <div class="archive-title">归档</div>
-                  <ul class="archive-grid">`;
-        
-        recentArchived.forEach(task => {
-          html += generateTaskItemHtml(task, true); // 传参告知是归档任务
-        });
-        
-        if (foldedArchived.length > 0) {
-          html += `</ul>
-                   <div class="date-header archive-folded-header" data-date="archive-folded" style="margin-top: 12px;">
-                     更多已归档任务 (${foldedArchived.length})
-                     <span class="toggle-icon">${shouldExpandArchive ? '▼' : '▶'}</span>
-                   </div>
-                   <div class="date-content" style="${shouldExpandArchive ? '' : 'display:none'}">
-                     <ul class="archive-grid" style="margin-top: 12px;">`;
-          foldedArchived.forEach(task => {
-            html += generateTaskItemHtml(task, true);
-          });
-          html += `</ul></div>`;
-        } else {
-          html += '</ul>';
-        }
-        html += '</div>';
+    // 记录当前的折叠状态，避免重绘后丢失
+    const expandedStates = {};
+    document.querySelectorAll('.date-header').forEach(header => {
+      const date = header.dataset.date;
+      const content = header.nextElementSibling;
+      if (date && content) {
+        expandedStates[date] = content.style.display !== 'none';
       }
-      
-      // 保存滚动条位置
-      const currentScrollTop = taskList.scrollTop;
-      
-      taskList.innerHTML = html;
-      
-      // 恢复滚动条位置
-      taskList.scrollTop = currentScrollTop;
+    });
+
+    // 仅首次进入时播放入场动画
+    taskList.classList.toggle('no-anim', taskList.dataset.rendered === 'true');
+    taskList.dataset.rendered = 'true';
+
+    if (tasks.length === 0) {
+      taskList.innerHTML = `
+        <li class="empty-state">
+          <div class="empty-title">还没有任务</div>
+          <div class="empty-hint">在上方输入框写下第一件事，回车即可创建</div>
+        </li>`;
+      return;
     }
+
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    // 已完成任务保留时长（0 = 永久，仅影响展示，不删除数据）
+    const retentionDays = Number(settings.taskRetentionDays) || 0;
+    const retentionCutoff = retentionDays > 0
+      ? now.getTime() - retentionDays * 24 * 60 * 60 * 1000
+      : 0;
+
+    // 分离任务：置顶、逾期、活动、归档
+    const pinnedTasks = [];
+    const overdueTasks = [];
+    const activeTasks = [];
+    const archivedTasks = [];
+    const staleArchivedTasks = [];
+
+    tasks.forEach(task => {
+      if (task.completed) {
+        const completedAt = new Date(task.completedTime || task.completedAt || task.createdAt || 0).getTime();
+        if (retentionCutoff && completedAt && completedAt < retentionCutoff) {
+          staleArchivedTasks.push(task);
+          return;
+        }
+        archivedTasks.push(task);
+      } else if (task.pinned) {
+        pinnedTasks.push(task);
+      } else if (isOverdue(task.due, now)) {
+        overdueTasks.push(task);
+      } else {
+        activeTasks.push(task);
+      }
+    });
+
+    const sortByDueAsc = (a, b) => {
+      const aTime = a.due ? new Date(a.due).getTime() : Number.MAX_SAFE_INTEGER;
+      const bTime = b.due ? new Date(b.due).getTime() : Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    };
+
+    let html = '';
+
+    // 渲染置顶区域
+    if (pinnedTasks.length > 0) {
+      html += `<div class="pinned-section">
+                <div class="section-title">置顶 · ${pinnedTasks.length}</div>
+                <ul>`;
+      pinnedTasks.sort(sortByDueAsc).forEach(task => {
+        html += generateTaskItemHtml(task);
+      });
+      html += '</ul></div>';
+    }
+
+    // 逾期任务优先展示
+    if (overdueTasks.length > 0) {
+      html += `<div class="overdue-section">
+                <div class="section-title overdue-title">
+                  <span>逾期 · ${overdueTasks.length}</span>
+                  <button type="button" class="overdue-postpone-btn" title="顺延到最近的可执行时间（今天 18:00 或明天 09:00）">全部顺延</button>
+                </div>
+                <ul>`;
+      overdueTasks.sort(sortByDueAsc).forEach(task => {
+        html += generateTaskItemHtml(task);
+      });
+      html += '</ul></div>';
+    }
+
+    // 按创建日期分组剩余活动任务，组内按截止时间排序
+    const tasksByDate = taskManager.groupTasksByDate(activeTasks);
+
+    Object.keys(tasksByDate).sort((a, b) => new Date(b) - new Date(a)).forEach(date => {
+      const dateObj = new Date(date);
+      const label = isSameDay(dateObj, now)
+        ? '今天'
+        : isSameDay(dateObj, yesterday)
+          ? '昨天'
+          : date;
+      const shouldExpand = expandedStates[date] !== undefined
+        ? expandedStates[date]
+        : (settings.autoExpandToday !== false && isSameDay(dateObj, now));
+
+      const dayTasks = tasksByDate[date].sort(sortByDueAsc);
+
+      html += `<div class="date-section">
+                <div class="date-header" data-date="${date}">
+                  ${label} · ${dayTasks.length}
+                  <span class="toggle-icon">${shouldExpand ? '▼' : '▶'}</span>
+                </div>
+                <div class="date-content" style="${shouldExpand ? '' : 'display:none'}">
+                  <ul>`;
+
+      dayTasks.forEach(task => {
+        html += generateTaskItemHtml(task);
+      });
+
+      html += `</ul></div></div>`;
+    });
+
+    // 渲染归档区域：默认折叠，避免挤占首屏
+    if ((archivedTasks.length > 0 || staleArchivedTasks.length > 0) && settings.showCompletedTasks !== false) {
+      const sortCompletedDesc = (a, b) => {
+        const aTime = new Date(a.completedTime || a.completedAt || a.createdAt || 0).getTime();
+        const bTime = new Date(b.completedTime || b.completedAt || b.createdAt || 0).getTime();
+        return bTime - aTime;
+      };
+
+      archivedTasks.sort(sortCompletedDesc);
+
+      const shouldExpandArchive = expandedStates['archive-folded'] === true;
+      const olderHint = staleArchivedTasks.length > 0
+        ? ` · 更早 ${staleArchivedTasks.length}`
+        : '';
+
+      html += `<div class="archive-section">
+                <div class="date-header archive-folded-header" data-date="archive-folded" title="${staleArchivedTasks.length > 0 ? `另有 ${staleArchivedTasks.length} 条超出保留期，见下方分组` : ''}">
+                  归档 · ${archivedTasks.length}${olderHint}
+                  <span class="toggle-icon">${shouldExpandArchive ? '▼' : '▶'}</span>
+                </div>
+                <div class="date-content" style="${shouldExpandArchive ? '' : 'display:none'}">
+                  <ul class="archive-grid">`;
+
+      archivedTasks.forEach(task => {
+        html += generateTaskItemHtml(task, true);
+      });
+
+      if (archivedTasks.length === 0) {
+        html += `<li class="archive-empty-hint">近期没有已归档任务</li>`;
+      }
+
+      html += `</ul></div></div>`;
+
+      // 超出保留期的归档任务仍可查看，不因展示过滤而彻底消失
+      if (staleArchivedTasks.length > 0) {
+        staleArchivedTasks.sort(sortCompletedDesc);
+        const shouldExpandStale = expandedStates['archive-stale'] === true;
+
+        html += `<div class="archive-section stale-archive-section">
+                  <div class="date-header" data-date="archive-stale" title="已完成超过保留时长，默认折叠；可在设置中调整保留时长">
+                    超出保留期 · ${staleArchivedTasks.length}
+                    <span class="toggle-icon">${shouldExpandStale ? '▼' : '▶'}</span>
+                  </div>
+                  <div class="date-content" style="${shouldExpandStale ? '' : 'display:none'}">
+                    <ul class="archive-grid">`;
+
+        staleArchivedTasks.forEach(task => {
+          html += generateTaskItemHtml(task, true);
+        });
+
+        html += `</ul></div></div>`;
+      }
+    }
+
+    // 保存滚动条位置
+    const currentScrollTop = taskList.scrollTop;
+
+    taskList.innerHTML = html;
+
+    // 恢复滚动条位置
+    taskList.scrollTop = currentScrollTop;
   } catch (error) {
     console.error('渲染任务失败:', error);
     showMessage('渲染任务失败，请重试', 'error');
@@ -931,132 +1192,207 @@ async function renderTasks() {
 }
 
 // 生成任务项HTML的函数
-function generateTaskItemHtml(task) {
-  // 处理备注内容，改为图标提示
+function generateTaskItemHtml(task, isArchived = false, query = '') {
+  const now = new Date();
+  const dueDate = task.due ? new Date(task.due) : null;
+  const overdue = !task.completed && isOverdue(task.due, now);
+  const dueToday = dueDate && !overdue && !task.completed && isSameDay(dueDate, now);
+
   const notesHtml = (task.notes && task.notes.trim() !== '') ? `
-    <div class="task-notes-indicator" title="附带备注 (点击查看/修改)">
-      <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="note-icon">
+    <div class="task-notes-indicator" title="查看/修改备注">
+      <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="note-icon">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
         <polyline points="14 2 14 8 20 8"></polyline>
         <line x1="16" y1="13" x2="8" y2="13"></line>
         <line x1="16" y1="17" x2="8" y2="17"></line>
-        <polyline points="10 9 9 9 8 9"></polyline>
       </svg>
-      <span>有备注</span>
+      <span>备注</span>
     </div>
   ` : '';
 
-  // 处理优先级徽章
   const priorityBadge = `
     <span class="priority-badge priority-${task.priority}">
       ${task.priority === 'high' ? '高' : task.priority === 'medium' ? '中' : '低'}
     </span>
   `;
 
-  // 处理标签
   const tagsHtml = task.tags && task.tags.length > 0 ? `
     <div class="task-tags">
       ${task.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
     </div>
   ` : '';
 
-  // 处理截止时间
-  const dueHtml = task.due ? `
-    <div class="time-info">
-      <span class="time-label">截止时间：</span>
-      <span class="time-value">${formatDateTime(task.due)}</span>
-    </div>
+  const editableDue = !isArchived && !task.completed;
+  const dueClass = `time-info${overdue ? ' is-overdue' : ''}${dueToday ? ' is-today' : ''}`;
+  const dueLabel = `${overdue ? '逾期 · ' : ''}${formatDueShort(task.due, now)}`;
+  const dueHtml = dueDate ? (
+    editableDue
+      ? `<button type="button" class="${dueClass} due-chip" data-due="${escapeHtml(task.due)}" title="截止 ${formatDateTime(task.due)} · 点击修改">
+          <span class="time-value">${dueLabel}</span>
+        </button>`
+      : `<div class="${dueClass}" title="截止时间 ${formatDateTime(task.due)}">
+          <span class="time-value">${dueLabel}</span>
+        </div>`
+  ) : '';
+
+  const completedHtml = (isArchived && task.completedTime) ? `
+    <div class="archived-completion-time">完成 ${formatDueShort(task.completedTime, now)}</div>
   ` : '';
 
-  if (task.completed) {
-    // 归档任务：显示标题、完成时间和备注
-    return `<li class="task-item archived" data-id="${task.id}">
-              <div class="archived-task task-clickable" data-task-id="${task.id}" data-task-text="${escapeHtml(task.text)}" data-task-notes="${escapeHtml(task.notes || '')}" data-is-archived="true">
-                <div class="archived-title">${priorityBadge}${escapeHtml(task.text)}</div>
-                <div class="archived-completion-time">${formatDateTime(task.completedTime)}</div>
-                ${dueHtml}
-                ${tagsHtml}
-                ${notesHtml}
+  const metaParts = [completedHtml, dueHtml, tagsHtml, notesHtml].filter(Boolean);
+  const metaHtml = metaParts.length > 0 ? `<div class="meta-row">${metaParts.join('')}</div>` : '';
+
+  const taskText = escapeHtml(task.text || '');
+  const taskNotes = escapeHtml(task.notes || '');
+  const titleHtml = `${priorityBadge}${highlightText(task.text || '', query)}`;
+
+  if (isArchived || task.completed) {
+    // 归档任务：标题 + 完成时间 + 截止时间/标签/备注
+    return `<li class="task-item archived" data-id="${escapeHtml(String(task.id))}">
+              <div class="archived-task task-clickable" data-task-id="${escapeHtml(String(task.id))}" data-task-text="${taskText}" data-task-notes="${taskNotes}" data-is-archived="true" tabindex="0" role="button">
+                <div class="archived-title">${titleHtml}</div>
+                ${metaHtml}
               </div>
             </li>`;
-  } else {
-    // 活动任务
-    return `<li class="task-item" data-id="${task.id}">
+  }
+
+  // 活动任务
+  return `<li class="task-item" data-id="${escapeHtml(String(task.id))}">
       <div class="task-container">
-        <input type="checkbox" ${task.completed ? 'checked' : ''} class="task-checkbox">
+        <input type="checkbox" class="task-checkbox" aria-label="标记完成：${taskText}">
         
-        <div class="info-container task-clickable" data-task-id="${task.id}" data-task-text="${escapeHtml(task.text)}" data-task-notes="${escapeHtml(task.notes || '')}" data-is-archived="false">
-          <div class="task-title ${task.completed ? 'completed' : ''}">${priorityBadge}${escapeHtml(task.text)}</div>
-          <div class="time-info">
-            <span class="time-label">添加时间：</span>
-            <span class="time-value">${formatDateTime(task.id)}</span>
-          </div>
-          ${dueHtml}
-          ${tagsHtml}
-          ${notesHtml}
+        <div class="info-container task-clickable" data-task-id="${escapeHtml(String(task.id))}" data-task-text="${taskText}" data-task-notes="${taskNotes}" data-is-archived="false" tabindex="0" role="button" title="点击查看备注，双击标题可编辑">
+          <div class="task-title">${titleHtml}</div>
+          ${metaHtml}
         </div>
         
         <div class="action-buttons">
-          ${!task.completed ? `<button class="pin-btn" data-pinned="${task.pinned ? 'true' : 'false'}">${task.pinned ? '★' : '☆'}</button>` : ''}
-          <button class="delete-btn">×</button>
+          <button class="edit-btn" aria-label="编辑任务标题" title="编辑标题">✎</button>
+          <button class="due-btn" aria-label="${task.due ? '修改截止时间' : '设置截止时间'}" title="${task.due ? '修改截止时间' : '设置截止时间'}">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+              <polyline points="12 7 12 12 15 14"></polyline>
+            </svg>
+          </button>
+          <button class="pin-btn" data-pinned="${task.pinned ? 'true' : 'false'}" aria-label="${task.pinned ? '取消置顶' : '置顶'}" aria-pressed="${task.pinned ? 'true' : 'false'}" title="${task.pinned ? '取消置顶' : '置顶'}">${task.pinned ? '★' : '☆'}</button>
+          <button class="delete-btn" aria-label="删除任务" title="删除任务">×</button>
         </div>
       </div>
     </li>`;
-  }
 }
 
 // 为任务添加事件监听
 function addTaskEventListeners() {
   const taskList = document.getElementById('task-list');
-  
+
+  const openNotesFor = (clickableElement) => {
+    openNotesModal(
+      parseInt(clickableElement.dataset.taskId),
+      clickableElement.dataset.taskText,
+      clickableElement.dataset.taskNotes,
+      clickableElement.dataset.isArchived === 'true'
+    );
+  };
+
+  // 单击标题打开备注，双击标题进入编辑：延迟单击以便区分
+  let pendingClickTimer = null;
+
   // 添加点击事件委托
   taskList.addEventListener('click', async (e) => {
-    if (e.target.classList.contains('pin-btn')) {
-      const taskItem = e.target.closest('.task-item');
+    const taskItem = e.target.closest('.task-item');
+
+    if (e.target.closest('.overdue-postpone-btn')) {
+      e.stopPropagation();
+      await postponeOverdueTasks();
+      return;
+    }
+
+    if (e.target.closest('.due-chip, .due-btn')) {
+      if (!taskItem) return;
+      e.stopPropagation();
+      const chip = taskItem.querySelector('.due-chip');
+      openTaskDueEditor(
+        e.target.closest('.due-chip, .due-btn'),
+        parseInt(taskItem.dataset.id),
+        chip ? chip.dataset.due : null
+      );
+      return;
+    }
+
+    if (e.target.closest('.edit-btn')) {
+      if (taskItem) startInlineEdit(taskItem);
+      return;
+    }
+
+    if (e.target.closest('.pin-btn')) {
+      if (!taskItem) return;
       const taskId = parseInt(taskItem.dataset.id);
-      
+
       try {
-        await taskManager.toggleTaskPinned(taskId);
-        renderTasks();
+        const task = await taskManager.toggleTaskPinned(taskId);
+        await renderTasks();
+        if (task && !task.pinned) {
+          revealTaskItem(taskId);
+        }
       } catch (error) {
         console.error('切换置顶状态失败:', error);
         showMessage('操作失败，请重试', 'error');
       }
+      return;
     }
-    
-    if (e.target.classList.contains('delete-btn')) {
-      const taskId = parseInt(e.target.closest('.task-item').dataset.id);
-      
-      if (confirm('确定要删除这个任务吗？')) {
-        try {
-          await taskManager.deleteTask(taskId);
-          renderTasks();
-          showMessage('任务已删除');
-        } catch (error) {
-          console.error('删除任务失败:', error);
-          showMessage('删除失败，请重试', 'error');
-        }
-      }
+
+    if (e.target.closest('.delete-btn')) {
+      if (!taskItem) return;
+      await handleDeleteTask(parseInt(taskItem.dataset.id));
+      return;
     }
-    
+
+    // 编辑输入框内的点击不应触发备注弹窗
+    if (e.target.closest('input, textarea, button')) return;
+
     // 备注点击事件
-    if (e.target.closest('.task-clickable')) {
-      const clickableElement = e.target.closest('.task-clickable');
-      const taskId = parseInt(clickableElement.dataset.taskId);
-      const taskText = clickableElement.dataset.taskText;
-      const taskNotes = clickableElement.dataset.taskNotes;
-      const isArchived = clickableElement.dataset.isArchived === 'true';
-      
-      openNotesModal(taskId, taskText, taskNotes, isArchived);
+    const clickableElement = e.target.closest('.task-clickable');
+    if (!clickableElement) return;
+
+    if (e.target.closest('.task-title')) {
+      if (pendingClickTimer) clearTimeout(pendingClickTimer);
+      pendingClickTimer = setTimeout(() => {
+        pendingClickTimer = null;
+        openNotesFor(clickableElement);
+      }, 220);
+    } else {
+      openNotesFor(clickableElement);
     }
   });
-  
+
+  // 双击标题就地编辑
+  taskList.addEventListener('dblclick', (e) => {
+    if (pendingClickTimer) {
+      clearTimeout(pendingClickTimer);
+      pendingClickTimer = null;
+    }
+    if (!e.target.closest('.task-title') || e.target.closest('.task-title-input')) return;
+    if (e.target.closest('.archived')) return;
+    const taskItem = e.target.closest('.task-item');
+    if (taskItem) startInlineEdit(taskItem);
+  });
+
+  // 键盘可访问性：Enter / Space 打开备注
+  taskList.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.target.closest('input, textarea, button')) return;
+    const clickableElement = e.target.closest('.task-clickable');
+    if (!clickableElement) return;
+    e.preventDefault();
+    openNotesFor(clickableElement);
+  });
+
   // 添加复选框状态监听
   taskList.addEventListener('change', async (e) => {
     if (e.target.classList.contains('task-checkbox')) {
       const taskItem = e.target.closest('.task-item');
       const taskId = parseInt(taskItem.dataset.id);
-      
+
       try {
         await taskManager.toggleTaskComplete(taskId);
         renderTasks();
@@ -1066,6 +1402,119 @@ function addTaskEventListeners() {
       }
     }
   });
+}
+
+// 标题就地编辑
+async function startInlineEdit(taskItem) {
+  if (taskItem.querySelector('.task-title-input')) return;
+  const titleEl = taskItem.querySelector('.task-title');
+  if (!titleEl) return;
+
+  const taskId = parseInt(taskItem.dataset.id);
+  const tasks = await taskManager.getAllTasks();
+  const task = tasks.find(item => item.id === taskId);
+  if (!task) return;
+
+  const originalText = task.text || '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'task-title-input';
+  input.value = originalText;
+  input.maxLength = 200;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = async (shouldSave) => {
+    if (finished) return;
+    finished = true;
+    const nextText = input.value.trim();
+
+    if (!shouldSave || !nextText || nextText === originalText) {
+      renderTasks();
+      return;
+    }
+
+    try {
+      await taskManager.updateTask(taskId, { text: nextText });
+      showMessage('标题已更新');
+    } catch (error) {
+      console.error('编辑任务失败:', error);
+      showMessage('保存失败，请重试', 'error');
+    }
+    renderTasks();
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('dblclick', (e) => e.stopPropagation());
+}
+
+// 删除任务（遵循 confirmDelete 设置，并提供撤销）
+async function handleDeleteTask(taskId) {
+  const settings = await taskManager.getSettings();
+  if (settings.confirmDelete !== false && !confirm('确定要删除这个任务吗？')) {
+    return;
+  }
+
+  const tasks = await taskManager.getAllTasks();
+  const task = tasks.find(item => item.id === taskId);
+
+  try {
+    await taskManager.deleteTask(taskId);
+    renderTasks();
+    if (task) {
+      showUndoToast(task);
+    } else {
+      showMessage('任务已删除');
+    }
+  } catch (error) {
+    console.error('删除任务失败:', error);
+    showMessage('删除失败，请重试', 'error');
+  }
+}
+
+let undoTimer = null;
+
+function showUndoToast(task) {
+  document.querySelectorAll('.undo-toast').forEach(node => node.remove());
+  if (undoTimer) clearTimeout(undoTimer);
+
+  const toast = document.createElement('div');
+  toast.className = 'undo-toast';
+  toast.innerHTML = '<span>任务已删除</span><button type="button">撤销</button>';
+  document.body.appendChild(toast);
+
+  const dismiss = () => {
+    if (undoTimer) clearTimeout(undoTimer);
+    undoTimer = null;
+    toast.remove();
+  };
+
+  toast.querySelector('button').addEventListener('click', async () => {
+    try {
+      await taskManager.restoreTask(task);
+      renderTasks();
+      showMessage('已撤销删除');
+    } catch (error) {
+      console.error('撤销删除失败:', error);
+      showMessage('撤销失败，请重试', 'error');
+    } finally {
+      dismiss();
+    }
+  });
+
+  undoTimer = setTimeout(dismiss, 5000);
 }
 
 // 备注模态框相关函数
@@ -1122,6 +1571,34 @@ function openNotesModal(taskId, taskTitle, currentNotes, isArchived) {
       // 点击保存按钮
       const currentTaskId = parseInt(modal.dataset.taskId);
       await saveNotes(currentTaskId);
+    }
+  });
+
+  // 自动保存备注（设置开启时，输入停止 700ms 后落盘）
+  if (!isArchived) {
+    taskManager.getSettings().then((settings) => {
+      if (settings.autoSaveNotes === false) return;
+      const textarea = modal.querySelector('.notes-textarea');
+      let timer = null;
+      textarea.addEventListener('input', () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(async () => {
+          if (!document.body.contains(modal)) return;
+          try {
+            await taskManager.saveTaskNotes(parseInt(modal.dataset.taskId), textarea.value.trim());
+          } catch (error) {
+            console.error('自动保存备注失败:', error);
+          }
+        }, 700);
+      });
+    });
+  }
+
+  // Ctrl/Cmd + Enter 快速保存
+  modal.querySelector('.notes-textarea').addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !isArchived) {
+      e.preventDefault();
+      saveNotes(parseInt(modal.dataset.taskId));
     }
   });
   

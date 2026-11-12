@@ -8,15 +8,35 @@
  * @returns {string} 转义后的文本
  */
 function escapeHtml(text) {
-  if (!text) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  // 替换引号和换行符，确保在HTML属性中使用也是安全的，并且保留换行
-  return div.innerHTML
+  if (text === null || text === undefined) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
     .replace(/\n/g, '&#10;')
     .replace(/\r/g, '&#13;');
+}
+
+/**
+ * 转义文本并高亮搜索命中片段（先转义再匹配，避免注入）
+ * @param {string} text - 原始文本
+ * @param {string} query - 搜索关键词
+ * @returns {string} 可安全插入 innerHTML 的 HTML
+ */
+function highlightText(text, query) {
+  const escaped = escapeHtml(text);
+  if (!query) return escaped;
+
+  const escapedQuery = escapeHtml(query).trim();
+  if (!escapedQuery) return escaped;
+
+  const pattern = escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return escaped.replace(
+    new RegExp(pattern, 'gi'),
+    (match) => `<mark class="search-hit">${match}</mark>`
+  );
 }
 
 /**
@@ -186,10 +206,50 @@ function isYesterday(date) {
   return d.toDateString() === yesterday.toDateString();
 }
 
+/**
+ * 判断两个时间是否落在本地同一天
+ */
+function isSameDay(date1, date2 = new Date()) {
+  const a = new Date(date1);
+  const b = new Date(date2);
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+/**
+ * 判断截止时间是否已过期
+ */
+function isOverdue(due, now = new Date()) {
+  if (!due) return false;
+  const time = new Date(due).getTime();
+  return !Number.isNaN(time) && time < now.getTime();
+}
+
+/**
+ * 压缩展示截止时间：今天 18:00 / 明天 09:00 / 11-15 09:00
+ */
+function formatDueShort(date, now = new Date()) {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+
+  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (isSameDay(d, now)) return `今天 ${time}`;
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (isSameDay(d, tomorrow)) return `明天 ${time}`;
+
+  const monthDay = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (d.getFullYear() === now.getFullYear()) return `${monthDay} ${time}`;
+  return `${d.getFullYear()}-${monthDay} ${time}`;
+}
+
 // 导出工具函数
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     escapeHtml,
+    highlightText,
     showMessage,
     debounce,
     throttle,
@@ -199,6 +259,9 @@ if (typeof module !== 'undefined' && module.exports) {
     formatDate,
     getDaysDifference,
     isToday,
-    isYesterday
+    isYesterday,
+    isSameDay,
+    isOverdue,
+    formatDueShort
   };
 }

@@ -1,5 +1,23 @@
 importScripts('constants.js');
 
+const TASK_ALARM_PREFIX = 'task-';
+
+function getSettings(callback) {
+  chrome.storage.sync.get({ settings: {} }, (result) => {
+    callback(result.settings || {});
+  });
+}
+
+function createNotification(options) {
+  getSettings((settings) => {
+    if (settings.enableNotifications === false) return;
+    chrome.notifications.create({
+      silent: !settings.soundNotifications,
+      ...options
+    });
+  });
+}
+
 /**
  * 后台服务初始化
  */
@@ -29,19 +47,35 @@ function initAutoBackup() {
  * 监听闹钟触发
  */
 chrome.alarms.onAlarm.addListener((alarm) => {
-  // 任务提醒
-  if (alarm.name !== 'ALARM_DAILY_BACKUP') {
-    chrome.notifications.create({
-      type: 'basic',
-      iconUrl: 'icons/icon128.png',
-      title: '任务提醒',
-      message: alarm.name
+  // 任务提醒：alarm 名只保存任务 id，标题从存储中读取，避免用户改名后信息过期
+  if (alarm.name.startsWith(TASK_ALARM_PREFIX)) {
+    const taskId = Number(alarm.name.slice(TASK_ALARM_PREFIX.length));
+    chrome.storage.local.get([STORAGE_KEYS.TASKS], (result) => {
+      const task = (result[STORAGE_KEYS.TASKS] || []).find(item => item.id === taskId);
+      if (!task || task.completed) return;
+
+      createNotification({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: '任务提醒',
+        message: task.text
+      });
     });
   }
   
   // 每日自动备份
   if (alarm.name === 'ALARM_DAILY_BACKUP') {
     executeAutoBackup();
+  }
+
+  // 兼容 3.5.0 及更早版本：提醒 alarm 以任务文本命名
+  if (!alarm.name.startsWith(TASK_ALARM_PREFIX) && alarm.name !== 'ALARM_DAILY_BACKUP') {
+    createNotification({
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: '任务提醒',
+      message: alarm.name
+    });
   }
 });
 
@@ -101,24 +135,27 @@ function cleanupOldBackups() {
  * 处理跨设备同步来的核心数据 (Merge 逻辑)
  */
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'sync' && changes[STORAGE_KEYS.SYNC_CORE_TASKS]) {
-    const newCoreTasks = changes[STORAGE_KEYS.SYNC_CORE_TASKS].newValue;
-    if (!newCoreTasks) return;
-    
+  if (areaName !== 'sync' || !changes[STORAGE_KEYS.SYNC_CORE_TASKS]) return;
+
+  const newCoreTasks = changes[STORAGE_KEYS.SYNC_CORE_TASKS].newValue;
+  if (!newCoreTasks) return;
+
+  getSettings((settings) => {
+    if (!settings.enableCloudSync) return;
+
     console.log('[DEBUG] 检测到远端云端数据更新，准备与本地数据合并...');
-    
+
     // 读取本地全量数据
     chrome.storage.local.get([STORAGE_KEYS.TASKS], (result) => {
       let localTasks = result[STORAGE_KEYS.TASKS] || [];
       let hasChanges = false;
-      
+
       // 合并逻辑：以 updated 时间戳为准，或补齐新任务
       newCoreTasks.forEach(coreTask => {
         const localIndex = localTasks.findIndex(t => t.id === coreTask.id);
-        
+
         if (localIndex === -1) {
           // 本地没有，说明是其他设备新建的任务，拉取到本地
-          // (由于是核心数据，缺少notes等字段，需要设置默认值)
           localTasks.push({
             ...coreTask,
             notes: '',
@@ -143,14 +180,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
           }
         }
       });
-      
+
       if (hasChanges) {
         chrome.storage.local.set({ [STORAGE_KEYS.TASKS]: localTasks }, () => {
           console.log('[DEBUG] 跨设备数据合并完成并存入本地。');
         });
       }
     });
-  }
+  });
 });
 
 /**
@@ -159,7 +196,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
  */
 chrome.runtime.onMessage.addListener((req) => {
   if (req.type === MESSAGE_TYPES.NEW_TASK) {
-    chrome.notifications.create({
+    createNotification({
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: '任务已添加',

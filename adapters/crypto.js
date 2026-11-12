@@ -1,17 +1,16 @@
 // adapters/crypto.js
-// 统一加密模块 - 使用静态盐 100K 迭代（向后兼容）
+// 统一加密模块：新数据使用随机盐，同时兼容 3.5.0 的随机盐格式与更早的静态盐格式
 class CryptoAdapter {
   constructor() {
     this.encoder = new TextEncoder();
     this.decoder = new TextDecoder();
-    this.SALT = this.encoder.encode('taskmaster-salt'); // 静态盐，保持兼容性
-    this.ITERATIONS = 100000; // 保持 100K 迭代
+    this.LEGACY_SALT = this.encoder.encode('taskmaster-salt');
+    this.ITERATIONS = 100000;
+    this.SALT_LENGTH = 16;
+    this.IV_LENGTH = 12;
   }
 
-  /**
-   * 派生加密密钥
-   */
-  async _deriveKey(pin) {
+  async _deriveKey(pin, salt) {
     const keyMaterial = await crypto.subtle.importKey(
       'raw',
       this.encoder.encode(pin),
@@ -23,7 +22,7 @@ class CryptoAdapter {
     return crypto.subtle.deriveKey(
       {
         name: 'PBKDF2',
-        salt: this.SALT,
+        salt,
         iterations: this.ITERATIONS,
         hash: 'SHA-256'
       },
@@ -34,8 +33,38 @@ class CryptoAdapter {
     );
   }
 
+  _toBase64(bytes) {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  _fromBase64(value) {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  _concat(...parts) {
+    const total = parts.reduce((sum, part) => sum + part.length, 0);
+    const result = new Uint8Array(total);
+    let offset = 0;
+    parts.forEach((part) => {
+      result.set(part, offset);
+      offset += part.length;
+    });
+    return result;
+  }
+
   /**
    * 加密文本
+   * 格式：Base64([随机盐 16][IV 12][密文])
    * @param {string} plaintext - 要加密的文本
    * @param {string} pin - PIN 码或密码
    * @returns {Promise<string|null>} Base64 编码的加密数据
@@ -44,30 +73,45 @@ class CryptoAdapter {
     if (!plaintext || !pin) return null;
 
     try {
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const cryptoKey = await this._deriveKey(pin);
+      const salt = crypto.getRandomValues(new Uint8Array(this.SALT_LENGTH));
+      const iv = crypto.getRandomValues(new Uint8Array(this.IV_LENGTH));
+      const cryptoKey = await this._deriveKey(pin, salt);
       const data = this.encoder.encode(plaintext);
 
       const encrypted = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv: iv },
+        { name: 'AES-GCM', iv },
         cryptoKey,
         data
       );
 
-      // 格式：Base64([IV 12][Encrypted]) - 保持向后兼容
-      const combined = new Uint8Array(iv.length + encrypted.byteLength);
-      combined.set(iv, 0);
-      combined.set(new Uint8Array(encrypted), iv.length);
-
-      return btoa(String.fromCharCode.apply(null, combined));
+      return this._toBase64(this._concat(salt, iv, new Uint8Array(encrypted)));
     } catch (error) {
       console.error('加密失败:', error);
       return null;
     }
   }
 
+  async _decryptWithLayout(bytes, pin, saltLength) {
+    const ivStart = saltLength;
+    const dataStart = saltLength + this.IV_LENGTH;
+    if (bytes.length <= dataStart) return null;
+
+    const salt = saltLength > 0 ? bytes.slice(0, saltLength) : this.LEGACY_SALT;
+    const iv = bytes.slice(ivStart, dataStart);
+    const data = bytes.slice(dataStart);
+    const cryptoKey = await this._deriveKey(pin, salt);
+
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      cryptoKey,
+      data
+    );
+
+    return this.decoder.decode(decrypted);
+  }
+
   /**
-   * 解密文本
+   * 解密文本，依次尝试随机盐格式和旧的静态盐格式
    * @param {string} ciphertextB64 - Base64 编码的加密数据
    * @param {string} pin - PIN 码或密码
    * @returns {Promise<string|null>} 解密后的文本
@@ -76,24 +120,20 @@ class CryptoAdapter {
     if (!ciphertextB64 || !pin) return null;
 
     try {
-      const combinedStr = atob(ciphertextB64);
-      const combined = new Uint8Array(combinedStr.length);
-      for (let i = 0; i < combinedStr.length; i++) {
-        combined[i] = combinedStr.charCodeAt(i);
+      const bytes = this._fromBase64(ciphertextB64);
+      const layouts = [this.SALT_LENGTH, 0];
+
+      for (const saltLength of layouts) {
+        try {
+          const result = await this._decryptWithLayout(bytes, pin, saltLength);
+          if (result !== null) return result;
+        } catch (error) {
+          // 尝试下一种格式
+        }
       }
 
-      const iv = combined.slice(0, 12);
-      const data = combined.slice(12);
-
-      const cryptoKey = await this._deriveKey(pin);
-
-      const decrypted = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: iv },
-        cryptoKey,
-        data
-      );
-
-      return this.decoder.decode(decrypted);
+      console.warn('解密失败：PIN 码错误或数据格式不受支持');
+      return null;
     } catch (error) {
       console.error('解密失败:', error);
       return null;
@@ -101,5 +141,11 @@ class CryptoAdapter {
   }
 }
 
-// Attach to window for global access
-window.cryptoAdapter = new CryptoAdapter();
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { CryptoAdapter };
+}
+
+if (typeof window !== 'undefined') {
+  window.CryptoAdapter = CryptoAdapter;
+  window.cryptoAdapter = new CryptoAdapter();
+}

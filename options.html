@@ -208,11 +208,27 @@
       font-weight: 600;
       letter-spacing: 0.2px;
       cursor: pointer;
-      transition: transform 0.2s var(--ease-out-expo);
+      transition: transform 0.2s var(--ease-out-expo), box-shadow 0.2s ease;
     }
 
     .save-btn:hover {
       transform: scale(0.98);
+    }
+
+    /* 保存栏粘底，长页面无需回滚 */
+    .settings-actions {
+      position: sticky;
+      bottom: 0;
+      z-index: 20;
+      display: flex;
+      gap: 16px;
+      margin-top: 64px;
+      padding: 16px 0;
+      background: linear-gradient(to top, var(--bg-primary) 72%, rgba(255, 255, 255, 0));
+    }
+
+    .settings-actions.dirty .save-btn {
+      box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.12);
     }
 
     .reset-btn {
@@ -268,32 +284,11 @@
   <div class="settings-container">
     <header class="settings-header">
       <h2>设置</h2>
-      <p class="subtitle">管理 TaskMaster 的显示、安全和数据选项。</p>
+      <p class="subtitle">管理 TaskMaster 的显示、AI 与数据选项。</p>
     </header>
 
     <section class="section-block">
-      <h3>安全</h3>
-      <div class="control-group">
-        <label class="modern-checkbox">
-          <input type="checkbox" id="enableEncryption">
-          <div class="label-text">
-            <span class="title">启用加密</span>
-            <span class="desc">加密存储任务数据，提高本地数据安全性</span>
-          </div>
-        </label>
-        
-        <div id="encryptionOptions" class="modern-input-group" style="display: none;">
-          <input type="password" id="encryptionKey" placeholder="请输入至少8位密钥">
-          <span class="warning-text">请妥善保管密钥，忘记密钥将无法恢复数据。</span>
-        </div>
-      </div>
-    </section>
-
-    <hr class="separator" />
-
-    <!-- AI 助理配置 -->
-    <section class="section-block">
-      <h3>✨ AI 助理配置</h3>
+      <h3>AI 助理配置</h3>
       <p class="subtitle" style="margin-bottom: 24px;">配置大语言模型接口，启用智能自然语言解析与截图任务提取功能。</p>
       
       <div class="control-group">
@@ -437,12 +432,12 @@
           <span class="title" style="font-weight:600; margin-bottom: 4px;">已完成任务保留时间</span>
           <select id="taskRetentionDays">
             <option value="30">30天</option>
-            <option value="90" selected>90天</option>
+            <option value="90">90天</option>
             <option value="180">180天</option>
             <option value="365">1年</option>
-            <option value="0">永久保留</option>
+            <option value="0" selected>永久保留</option>
           </select>
-          <span class="desc" style="font-size:13px; color:var(--text-secondary); margin-top:4px;">设置已完成任务的保留时长</span>
+          <span class="desc" style="font-size:13px; color:var(--text-secondary); margin-top:4px;">超出时长的已完成任务会收纳到「超出保留期」分组，仍可展开查看（数据不删除）</span>
         </div>
       </div>
     </section>
@@ -472,6 +467,21 @@
     <hr class="separator" />
 
     <section class="section-block">
+      <h3>跨设备同步</h3>
+      <div class="control-group">
+        <label class="modern-checkbox">
+          <input type="checkbox" id="enableCloudSync">
+          <div class="label-text">
+            <span class="title">启用云同步</span>
+            <span class="desc">通过浏览器账号同步标题、状态、优先级和截止时间（不含备注与标签）</span>
+          </div>
+        </label>
+      </div>
+    </section>
+
+    <hr class="separator" />
+
+    <section class="section-block">
       <h3>数据管理</h3>
       <p class="subtitle" style="margin-bottom: 24px;">更换浏览器或重装插件前，建议先导出备份。</p>
       
@@ -484,15 +494,17 @@
       </div>
       
       <div id="dataStats"></div>
+      <div id="backupList"></div>
     </section>
 
-    <div style="display: flex; gap: 16px; margin-top: 64px;">
+    <div class="settings-actions">
       <button id="saveSettings" class="save-btn">保存设置</button>
       <button id="resetSettings" class="reset-btn">恢复默认</button>
     </div>
   </div>
 
   <script src="constants.js"></script>
+  <script src="utils.js"></script>
   <script src="adapters/storage.js"></script>
   <script src="adapters/crypto.js"></script>
   <script src="options.js"></script>

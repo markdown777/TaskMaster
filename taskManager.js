@@ -8,17 +8,34 @@
 class TaskManager {
   constructor() {
     this.tasks = [];
-    this._writeTimer = null;
+    this._loaded = false;
+    this._loadPromise = null;
     this._pendingSave = null;
-    this._isSaving = false;
+    this._flushPromise = null;
+    this._lastTaskId = 0;
     this.loadTasks();
   }
 
   /**
    * 加载任务数据 (支持从 sync 迁移到 local)
+   * 首次加载后使用内存缓存，避免写入延迟期间读到旧数据
    * @returns {Promise<Array>} 任务数组
    */
   async loadTasks() {
+    if (this._loaded) {
+      return this.tasks;
+    }
+
+    if (!this._loadPromise) {
+      this._loadPromise = this._readInitialTasks().finally(() => {
+        this._loadPromise = null;
+      });
+    }
+
+    return this._loadPromise;
+  }
+
+  async _readInitialTasks() {
     return new Promise((resolve, reject) => {
       // 优先从 local 存储读取，如果 local 中没有数据，尝试从 sync 迁移
       chrome.storage.local.get({ tasks: null }, (localResult) => {
@@ -29,6 +46,7 @@ class TaskManager {
 
         if (localResult.tasks !== null) {
           this.tasks = localResult.tasks;
+          this._loaded = true;
           return resolve(this.tasks);
         }
 
@@ -40,21 +58,18 @@ class TaskManager {
           }
 
           const syncTasks = syncResult.tasks || [];
-          
+          this.tasks = syncTasks;
+          this._loaded = true;
+
           if (syncTasks.length > 0) {
-            this.tasks = syncTasks;
-            // 将数据保存到 local
             this.saveTasks(syncTasks).then(() => {
               console.log('[DEBUG] 成功将任务从旧的 sync 迁移到 local 存储');
-              // 清理旧的 sync 存储以释放配额空间
               chrome.storage.sync.remove('tasks');
             }).catch(error => {
               console.error('迁移任务到本地失败:', error);
             });
-          } else {
-            this.tasks = [];
           }
-          
+
           resolve(this.tasks);
         });
       });
@@ -62,85 +77,139 @@ class TaskManager {
   }
 
   /**
-   * 保存任务数据（带合并机制）
-   * @param {Array} tasks - 任务数组
-   * @returns {Promise<boolean>} 保存是否成功
+   * 外部写入（后台跨设备合并等）后刷新内存缓存
+   * @param {Array} tasks - 最新的任务数组
    */
-  async saveTasks(tasks) {
+  syncFromStorage(tasks) {
+    if (!Array.isArray(tasks)) return;
     this.tasks = tasks;
-
-    // 清除之前的定时器
-    if (this._writeTimer) {
-      clearTimeout(this._writeTimer);
-    }
-
-    // 保存最新状态
-    this._pendingSave = [...tasks];
-
-    // 返回 Promise，延迟 500ms 执行批量写入
-    return new Promise((resolve, reject) => {
-      this._writeTimer = setTimeout(() => {
-        this._flushWrite().then(resolve).catch(reject);
-      }, 500);
-    });
+    this._loaded = true;
   }
 
   /**
-   * 实际执行写入操作
+   * 保存任务数据：串行写队列，合并期间的多次修改，且不丢弃任何调用方的 Promise
+   * @param {Array} tasks - 任务数组
+   * @returns {Promise<boolean>} 所有待写数据落盘后 resolve
    */
-  async _flushWrite() {
-    if (this._isSaving || !this._pendingSave) {
-      return true;
+  async saveTasks(tasks) {
+    this.tasks = tasks;
+    this._loaded = true;
+    this._pendingSave = tasks;
+
+    if (!this._flushPromise) {
+      this._flushPromise = this._drainWrites();
     }
 
-    this._isSaving = true;
-    const tasks = this._pendingSave;
-    this._pendingSave = null;
+    return this._flushPromise;
+  }
 
+  async _drainWrites() {
+    try {
+      while (this._pendingSave) {
+        const tasks = this._pendingSave;
+        this._pendingSave = null;
+        await this._writeTasks(tasks);
+      }
+      return true;
+    } finally {
+      this._flushPromise = null;
+    }
+  }
+
+  _writeTasks(tasks) {
     return new Promise((resolve, reject) => {
       chrome.storage.local.set({ tasks }, () => {
-        this._isSaving = false;
         if (chrome.runtime && chrome.runtime.lastError) {
           console.error('保存任务失败:', chrome.runtime.lastError);
+          // 保留待写状态，下一次保存时重试
+          if (!this._pendingSave) {
+            this._pendingSave = tasks;
+          }
           reject(chrome.runtime.lastError);
-        } else {
-          // 同时将核心数据同步到云端
-          this.syncCoreDataToCloud(tasks);
-          resolve(true);
+          return;
         }
+
+        this.syncCoreDataToCloud(tasks);
+        resolve(true);
       });
     });
+  }
+
+  async _getSettings() {
+    return new Promise((resolve) => {
+      chrome.storage.sync.get({ settings: {} }, (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          resolve({});
+          return;
+        }
+        resolve(result.settings || {});
+      });
+    });
+  }
+
+  getSettings() {
+    return this._getSettings();
+  }
+
+  _alarmName(taskId) {
+    return `task-${taskId}`;
+  }
+
+  _scheduleAlarm(task) {
+    if (!chrome.alarms || !task || task.completed || !task.due) return;
+
+    const when = new Date(task.due).getTime();
+    if (Number.isNaN(when) || when <= Date.now()) return;
+
+    chrome.alarms.create(this._alarmName(task.id), { when });
+  }
+
+  _clearAlarm(taskId) {
+    if (chrome.alarms) {
+      chrome.alarms.clear(this._alarmName(taskId));
+    }
+  }
+
+  _nextTaskId() {
+    const id = Math.max(Date.now(), this._lastTaskId + 1);
+    this._lastTaskId = id;
+    return id;
+  }
+
+  isSaving() {
+    return Boolean(this._flushPromise || this._pendingSave);
   }
 
   /**
    * 将核心任务数据同步到 sync 存储
-   * 只保留基础字段，避免超出 100KB 限制
+   * 仅在设置中显式开启 enableCloudSync 时执行，避免静默上传
    * @param {Array} tasks - 任务数组
    */
   syncCoreDataToCloud(tasks) {
-    try {
-      // 提取核心字段，过滤掉长文本(notes)等
-      const coreTasks = tasks.map(task => ({
-        id: task.id,
-        text: task.text.length > 50 ? task.text.substring(0, 50) + '...' : task.text, // 截断超长标题
-        completed: task.completed,
-        priority: task.priority,
-        due: task.due,
-        pinned: task.pinned,
-        updatedAt: Date.now() // 加入时间戳，解决跨设备冲突
-      }));
-      
-      const syncKey = typeof STORAGE_KEYS !== 'undefined' ? STORAGE_KEYS.SYNC_CORE_TASKS : 'sync_core_tasks';
-      chrome.storage.sync.set({ [syncKey]: coreTasks }, () => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          console.warn('[DEBUG] 同步核心数据到云端受限:', chrome.runtime.lastError);
-        } else {
-          console.log('[DEBUG] 核心数据已同步到云端');
-        }
-      });
-    } catch (error) {
-      console.error('同步云端数据失败:', error);
-    }
+    this._getSettings().then((settings) => {
+      if (!settings.enableCloudSync) return;
+
+      try {
+        const coreTasks = tasks.map(task => ({
+          id: task.id,
+          text: task.text,
+          completed: task.completed,
+          priority: task.priority,
+          due: task.due,
+          pinned: task.pinned,
+          updatedAt: task.updatedAt || Date.now()
+        }));
+
+        const syncKey = typeof STORAGE_KEYS !== 'undefined' ? STORAGE_KEYS.SYNC_CORE_TASKS : 'sync_core_tasks';
+        chrome.storage.sync.set({ [syncKey]: coreTasks }, () => {
+          if (chrome.runtime && chrome.runtime.lastError) {
+            console.warn('[DEBUG] 同步核心数据到云端受限:', chrome.runtime.lastError);
+          }
+        });
+      } catch (error) {
+        console.error('同步云端数据失败:', error);
+      }
+    });
   }
 
   /**
@@ -150,15 +219,17 @@ class TaskManager {
    */
   async addTask(taskData) {
     try {
+      const now = Date.now();
       const newTask = {
-        id: Date.now(),
+        id: this._nextTaskId(),
         text: taskData.text,
         completed: false,
-        createdAt: new Date().toISOString(),
-        due: taskData.due || new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date(now).toISOString(),
+        due: taskData.due || null,
         priority: taskData.priority || 'medium',
         tags: taskData.tags || [],
-        notes: taskData.notes || ''
+        notes: taskData.notes || '',
+        updatedAt: now
       };
 
       const tasks = await this.loadTasks();
@@ -166,13 +237,9 @@ class TaskManager {
       await this.saveTasks(tasks);
 
       // 创建提醒
-      if (chrome.alarms) {
-        chrome.alarms.create(newTask.text, {
-          when: new Date(newTask.due).getTime()
-        });
-      }
+      this._scheduleAlarm(newTask);
 
-      // 发送任务添加通知
+      // 发送任务添加通知（后台会根据设置决定是否展示）
       if (chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage({
           type: typeof MESSAGE_TYPES !== 'undefined' ? MESSAGE_TYPES.NEW_TASK : 'NEW_TASK',
@@ -202,7 +269,7 @@ class TaskManager {
         throw new Error('任务未找到');
       }
 
-      const updatedTask = { ...tasks[taskIndex], ...updates };
+      const updatedTask = { ...tasks[taskIndex], ...updates, updatedAt: Date.now() };
       tasks[taskIndex] = updatedTask;
 
       // 如果任务完成，取消置顶
@@ -215,10 +282,59 @@ class TaskManager {
         updatedTask.completedTime = Date.now();
       }
 
+      if (updatedTask.completed) {
+        this._clearAlarm(updatedTask.id);
+      } else {
+        this._clearAlarm(updatedTask.id);
+        if (updatedTask.due) {
+          this._scheduleAlarm(updatedTask);
+        }
+      }
+
       await this.saveTasks(tasks);
       return updatedTask;
     } catch (error) {
       console.error('更新任务失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 批量设置截止时间（单次落盘，供逾期任务批量顺延使用）
+   * @param {Array<number>} taskIds - 任务ID数组
+   * @param {string|null} due - ISO 时间或 null（清除）
+   * @returns {Promise<Array<Object>>} 已更新的任务
+   */
+  async setTasksDue(taskIds, due) {
+    try {
+      const ids = new Set((taskIds || []).map(Number));
+      if (ids.size === 0) return [];
+
+      const tasks = await this.loadTasks();
+      const dueValue = due || null;
+      const updatedAt = Date.now();
+      const updated = [];
+
+      tasks.forEach((task) => {
+        if (!ids.has(task.id) || task.completed) return;
+
+        task.due = dueValue;
+        task.updatedAt = updatedAt;
+        updated.push(task);
+
+        this._clearAlarm(task.id);
+        if (dueValue) {
+          this._scheduleAlarm(task);
+        }
+      });
+
+      if (updated.length > 0) {
+        await this.saveTasks(tasks);
+      }
+
+      return updated;
+    } catch (error) {
+      console.error('批量设置截止时间失败:', error);
       throw error;
     }
   }
@@ -233,6 +349,7 @@ class TaskManager {
       const tasks = await this.loadTasks();
       const filteredTasks = tasks.filter(t => t.id !== taskId);
       await this.saveTasks(filteredTasks);
+      this._clearAlarm(taskId);
       return true;
     } catch (error) {
       console.error('删除任务失败:', error);
@@ -250,9 +367,40 @@ class TaskManager {
       const tasks = await this.loadTasks();
       const filteredTasks = tasks.filter(t => !taskIds.includes(t.id));
       await this.saveTasks(filteredTasks);
+      taskIds.forEach(taskId => this._clearAlarm(taskId));
       return true;
     } catch (error) {
       console.error('批量删除任务失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 恢复被删除的任务（保留原 id，用于撤销删除）
+   * @param {Object} task - 任务对象
+   * @returns {Promise<Object>} 恢复后的任务
+   */
+  async restoreTask(task) {
+    try {
+      if (!task || !task.id) {
+        throw new Error('无效的任务');
+      }
+
+      const tasks = await this.loadTasks();
+      const existing = tasks.find(item => item.id === task.id);
+      if (existing) return existing;
+
+      tasks.push(task);
+      await this.saveTasks(tasks);
+
+      this._lastTaskId = Math.max(this._lastTaskId, task.id);
+      if (!task.completed) {
+        this._scheduleAlarm(task);
+      }
+
+      return task;
+    } catch (error) {
+      console.error('恢复任务失败:', error);
       throw error;
     }
   }
@@ -273,10 +421,17 @@ class TaskManager {
 
       const task = tasks[taskIndex];
       task.completed = !task.completed;
+      task.updatedAt = Date.now();
 
       if (task.completed) {
         task.completedTime = Date.now();
         task.pinned = false; // 完成后取消置顶
+        this._clearAlarm(task.id);
+      } else {
+        delete task.completedTime;
+        if (task.due) {
+          this._scheduleAlarm(task);
+        }
       }
 
       await this.saveTasks(tasks);
@@ -304,6 +459,7 @@ class TaskManager {
       const task = tasks[taskIndex];
       if (!task.completed) {
         task.pinned = !task.pinned;
+        task.updatedAt = Date.now();
         await this.saveTasks(tasks);
       }
 
@@ -330,6 +486,7 @@ class TaskManager {
       }
 
       tasks[taskIndex].notes = notes;
+      tasks[taskIndex].updatedAt = Date.now();
       await this.saveTasks(tasks);
       return tasks[taskIndex];
     } catch (error) {

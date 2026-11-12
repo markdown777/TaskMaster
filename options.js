@@ -1,18 +1,17 @@
 // 默认设置
 const DEFAULT_SETTINGS = {
-  enableEncryption: false,
-  encryptionKey: '',
-
   showCompletedTasks: true,
   autoExpandToday: true,
   showTaskStats: true,
 
   confirmDelete: true,
   autoSaveNotes: true,
-  taskRetentionDays: 90,
+  taskRetentionDays: 0,
 
   enableNotifications: true,
-  soundNotifications: false
+  soundNotifications: false,
+
+  enableCloudSync: false
 };
 
 // 显示状态消息
@@ -60,11 +59,6 @@ async function loadSettings() {
   chrome.storage.sync.get(['settings'], (result) => {
     const settings = { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
     
-    // 安全设置
-    document.getElementById('enableEncryption').checked = settings.enableEncryption;
-    document.getElementById('encryptionKey').value = settings.encryptionKey;
-    toggleEncryptionOptions(settings.enableEncryption);
-    
     // 显示设置
     document.getElementById('showCompletedTasks').checked = settings.showCompletedTasks;
     document.getElementById('autoExpandToday').checked = settings.autoExpandToday;
@@ -78,6 +72,12 @@ async function loadSettings() {
     // 提醒设置
     document.getElementById('enableNotifications').checked = settings.enableNotifications;
     document.getElementById('soundNotifications').checked = settings.soundNotifications;
+
+    // 同步设置
+    const cloudSyncCheckbox = document.getElementById('enableCloudSync');
+    if (cloudSyncCheckbox) {
+      cloudSyncCheckbox.checked = settings.enableCloudSync;
+    }
     
     // 更新数据统计
     updateDataStats();
@@ -276,10 +276,6 @@ async function saveSettings() {
   await window.storageAdapter.set('VISION_CONFIG', visionConfig);
 
   const settings = {
-    // 安全设置
-    enableEncryption: document.getElementById('enableEncryption').checked,
-    encryptionKey: document.getElementById('encryptionKey').value,
-    
     // 显示设置
     showCompletedTasks: document.getElementById('showCompletedTasks').checked,
     autoExpandToday: document.getElementById('autoExpandToday').checked,
@@ -292,76 +288,87 @@ async function saveSettings() {
     
     // 提醒设置
     enableNotifications: document.getElementById('enableNotifications').checked,
-    soundNotifications: document.getElementById('soundNotifications').checked
+    soundNotifications: document.getElementById('soundNotifications').checked,
+
+    // 同步设置
+    enableCloudSync: document.getElementById('enableCloudSync')?.checked || false
   };
   
-  // 验证加密密钥
-  if (settings.enableEncryption && settings.encryptionKey.length < 8) {
-    showMessage('加密密钥至少需要8位字符', 'error');
-    return;
-  }
-  
-  chrome.storage.sync.set({ settings }, async () => {
-    if (chrome.runtime && chrome.runtime.lastError) {
-      showMessage('设置保存失败：' + chrome.runtime.lastError.message, 'error');
-    } else {
-      showMessage('设置保存成功！');
-      
-      const saveBtn = document.getElementById('saveSettings');
-      saveBtn.textContent = '保存成功！';
-      setTimeout(() => {
-        saveBtn.textContent = '保存设置';
-      }, 2000);
-      
-      // 如果启用了加密，重新加密所有任务数据
-      if (settings.enableEncryption && settings.encryptionKey) {
-        await encryptAllTasks(settings.encryptionKey);
+  // 合并已有设置，避免覆盖历史字段（如旧版加密配置）
+  chrome.storage.sync.get(['settings'], (result) => {
+    const mergedSettings = { ...(result.settings || {}), ...settings };
+
+    chrome.storage.sync.set({ settings: mergedSettings }, async () => {
+      if (chrome.runtime && chrome.runtime.lastError) {
+        showMessage('设置保存失败：' + chrome.runtime.lastError.message, 'error');
+      } else {
+        showMessage('设置保存成功！');
+
+        if (!settings.enableCloudSync) {
+          const syncKey = typeof STORAGE_KEYS !== 'undefined' ? STORAGE_KEYS.SYNC_CORE_TASKS : 'sync_core_tasks';
+          chrome.storage.sync.remove(syncKey);
+        }
+
+        const saveBtn = document.getElementById('saveSettings');
+        const actions = document.querySelector('.settings-actions');
+        if (actions) actions.classList.remove('dirty');
+        saveBtn.textContent = '保存成功！';
+        setTimeout(() => {
+          saveBtn.textContent = '保存设置';
+        }, 2000);
       }
-    }
+    });
   });
 }
 
-// 加密所有任务数据
-async function encryptAllTasks(key) {
-  try {
-    const tasks = await new Promise((resolve, reject) => {
-      chrome.storage.local.get(['tasks'], (result) => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-        } else {
-          resolve(result.tasks || []);
-        }
-      });
-    });
-    
-    // 异步加密每个任务
-    const encryptedTasks = await Promise.all(tasks.map(async (task) => ({
-      ...task,
-      text: await window.cryptoAdapter.encrypt(task.text, key),
-      notes: task.notes ? await window.cryptoAdapter.encrypt(task.notes, key) : task.notes
-    })));
-    
-    await new Promise((resolve, reject) => {
-      chrome.storage.local.set({ tasks: encryptedTasks }, () => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-        } else {
-          resolve();
-        }
-      });
-    });
-    
-    showMessage('任务数据已加密');
-  } catch (error) {
-    console.error('加密所有任务失败:', error);
-    showMessage('加密失败，请重试', 'error');
-  }
-}
+// 旧版“任务数据加密”已移除（浏览器端从未实现解密，启用后会显示密文）
+// 这里做一次性修复：用历史密钥解密已加密任务，并关闭该开关
+async function migrateLegacyTaskEncryption() {
+  const { settings = {} } = await new Promise(resolve => {
+    chrome.storage.sync.get(['settings'], resolve);
+  });
 
-// 切换加密选项显示
-function toggleEncryptionOptions(show) {
-  const options = document.getElementById('encryptionOptions');
-  options.style.display = show ? 'block' : 'none';
+  if (!settings.enableEncryption || !settings.encryptionKey) return false;
+
+  const tasks = (await window.storageAdapter.get('tasks')) || [];
+  if (tasks.length === 0) {
+    chrome.storage.sync.set({ settings: { ...settings, enableEncryption: false } });
+    return false;
+  }
+
+  try {
+    const failures = { count: 0 };
+    const looksEncrypted = (value) => typeof value === 'string'
+      && value.length >= 40
+      && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+
+    const decryptField = async (value) => {
+      if (!value || !looksEncrypted(value)) return value;
+      const decrypted = await window.cryptoAdapter.decrypt(value, settings.encryptionKey);
+      if (decrypted !== null) return decrypted;
+      failures.count++;
+      return value;
+    };
+
+    const decryptedTasks = await Promise.all(tasks.map(async (task) => ({
+      ...task,
+      text: await decryptField(task.text),
+      notes: await decryptField(task.notes)
+    })));
+
+    if (failures.count > 0) {
+      throw new Error(`有 ${failures.count} 个字段解密失败`);
+    }
+
+    await window.storageAdapter.set('tasks', decryptedTasks);
+    chrome.storage.sync.set({ settings: { ...settings, enableEncryption: false } });
+    showMessage('已解密历史任务数据并关闭已废弃的“任务数据加密”');
+    return true;
+  } catch (error) {
+    console.error('迁移旧版任务加密失败:', error);
+    showMessage('历史任务数据解密失败，请检查密钥或从备份恢复', 'error');
+    return false;
+  }
 }
 
 // 切换AI提供商选项显示
@@ -523,6 +530,11 @@ function handleFileImport(event) {
       );
       
       if (!isValid) throw new Error('数据格式错误：缺少必要字段');
+
+      if (!confirm(`导入将覆盖当前全部任务（共 ${tasks.length} 条），确定继续吗？`)) {
+        event.target.value = '';
+        return;
+      }
       
       // 如果当前启用了加密，对导入的数据进行加密
       chrome.storage.sync.get(['settings'], async (result) => {
@@ -592,20 +604,20 @@ function showBackupList() {
     backupKeys.forEach(key => {
       const backupTime = allData[key].backupTime ? new Date(allData[key].backupTime).toLocaleString() : '未知时间';
       const tasksCount = allData[key].data ? allData[key].data.length : 0;
+      const label = key.replace(typeof STORAGE_KEYS !== 'undefined' ? STORAGE_KEYS.BACKUP_PREFIX : 'backup_data_', '');
       html += `<div style="margin-bottom:8px; padding:8px; border:1px solid #ddd; border-radius:4px; background:#fff;">
-                 <span style="font-weight:bold;">${key.replace(typeof STORAGE_KEYS !== 'undefined' ? STORAGE_KEYS.BACKUP_PREFIX : 'backup_data_', '')}</span> 
-                 <span style="color:#666; font-size:12px;">(${tasksCount} 个任务, ${backupTime})</span>
-                 <button onclick="restoreFromBackupKey('${key}')" style="margin-left:10px; padding:2px 8px; cursor:pointer;">恢复此备份</button>
+                 <span style="font-weight:bold;">${escapeHtml(label)}</span> 
+                 <span style="color:#666; font-size:12px;">(${tasksCount} 个任务, ${escapeHtml(backupTime)})</span>
+                 <button class="restore-backup-btn" data-backup-key="${escapeHtml(key)}" style="margin-left:10px; padding:2px 8px; cursor:pointer;">恢复此备份</button>
                </div>`;
     });
     
-    const statsDiv = document.getElementById('dataStats');
-    statsDiv.innerHTML = html;
+    const backupListDiv = document.getElementById('backupList');
+    if (backupListDiv) backupListDiv.innerHTML = html;
   });
 }
 
-// 暴露到全局供内联 onclick 调用
-window.restoreFromBackupKey = function(key) {
+function restoreFromBackupKey(key) {
   if (confirm(`确定要使用 ${key} 的数据覆盖当前任务吗？`)) {
     chrome.storage.local.get(key, (result) => {
       const backupData = result[key];
@@ -621,17 +633,36 @@ window.restoreFromBackupKey = function(key) {
       }
     });
   }
-};
+}
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
   // 加载设置
   loadSettings();
-  
-  // 加密选项切换
-  document.getElementById('enableEncryption').addEventListener('change', (e) => {
-    toggleEncryptionOptions(e.target.checked);
-  });
+
+  // 修复旧版任务数据加密遗留问题
+  migrateLegacyTaskEncryption();
+
+  // 未保存修改提示
+  const settingsContainer = document.querySelector('.settings-container');
+  const settingsActions = document.querySelector('.settings-actions');
+  if (settingsContainer && settingsActions) {
+    const markDirty = () => {
+      settingsActions.classList.add('dirty');
+      const saveBtn = document.getElementById('saveSettings');
+      if (saveBtn && saveBtn.textContent === '保存设置') {
+        saveBtn.textContent = '保存修改';
+      }
+    };
+    settingsContainer.addEventListener('input', markDirty);
+    settingsContainer.addEventListener('change', markDirty);
+
+    window.addEventListener('beforeunload', (e) => {
+      if (!settingsActions.classList.contains('dirty')) return;
+      e.preventDefault();
+      e.returnValue = '';
+    });
+  }
 
   // AI 助理配置选项切换
   document.getElementById('aiProvider').addEventListener('change', toggleAiProvider);
@@ -676,6 +707,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('importFile').addEventListener('change', handleFileImport);
   document.getElementById('clearAllData').addEventListener('click', clearAllData);
   document.getElementById('showBackupsBtn')?.addEventListener('click', showBackupList);
+
+  // MV3 禁止内联 onclick，备份恢复使用事件委托
+  document.getElementById('dataStats').addEventListener('click', (e) => {
+    const restoreBtn = e.target.closest('.restore-backup-btn');
+    if (!restoreBtn) return;
+    restoreFromBackupKey(restoreBtn.dataset.backupKey);
+  });
   
   // 定期更新数据统计
   setInterval(updateDataStats, 30000); // 每30秒更新一次
