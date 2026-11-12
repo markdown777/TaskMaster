@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const dueButton = document.getElementById('due-button');
   const duePopover = document.getElementById('due-popover');
   const duePopoverClose = document.getElementById('due-popover-close');
+  const duePopoverConfirm = document.getElementById('due-popover-confirm');
   const taskList = document.getElementById('task-list');
   
   // 搜索元素获取
@@ -285,12 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateStr)) {
           document.getElementById('task-due').value = dateStr;
-          const dueButton = document.getElementById('due-button');
-          if (dueButton) {
-            dueButton.textContent = '已设时间';
-            dueButton.style.background = 'var(--brand-color)';
-            dueButton.style.color = 'var(--bg-primary)';
-          }
+          updateDueButtonState(document.getElementById('due-button'), dateStr);
         } else {
           // Fallback: If LLM returns an unstandardized format, parse using Date and compensate for local timezone
           const dateObj = new Date(dateStr);
@@ -298,12 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const tzOffset = dateObj.getTimezoneOffset() * 60000;
             const localISOTime = (new Date(dateObj - tzOffset)).toISOString().slice(0, 16);
             document.getElementById('task-due').value = localISOTime;
-            const dueButton = document.getElementById('due-button');
-            if (dueButton) {
-              dueButton.textContent = '已设时间';
-              dueButton.style.background = 'var(--brand-color)';
-              dueButton.style.color = 'var(--bg-primary)';
-            }
+            updateDueButtonState(document.getElementById('due-button'), localISOTime);
           }
         }
       }
@@ -467,6 +458,8 @@ document.addEventListener('DOMContentLoaded', () => {
         taskTags.value = '';
         taskDue.value = '';
         updateDueButtonState(dueButton, taskDue.value);
+        duePopover.hidden = true;
+        dueButton.dataset.active = 'false';
         
         renderTasks();
         showMessage('任务已添加');
@@ -479,7 +472,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 搜索功能事件监听
   initializeSearchEvents();
-  initializeDuePicker(dueButton, duePopover, duePopoverClose, taskDue);
+  initializeDuePicker(dueButton, duePopover, duePopoverClose, duePopoverConfirm, taskDue);
   
   /**
    * 分享按钮事件处理
@@ -613,13 +606,18 @@ function computeDuePreset(preset, now = new Date()) {
 /**
  * 初始化截止时间弹层选择器
  * 通过一个紧凑按钮触发时间选择，减少表单区域的视觉复杂度
+ * 弹层内的选择是“草稿”：确定后才写回按钮，取消/点外部/Esc 恢复原值
  * @param {HTMLButtonElement|null} dueButton - 触发按钮
  * @param {HTMLElement|null} duePopover - 弹层容器
- * @param {HTMLButtonElement|null} duePopoverClose - 弹层关闭按钮
+ * @param {HTMLButtonElement|null} duePopoverClose - 取消按钮
+ * @param {HTMLButtonElement|null} duePopoverConfirm - 确定按钮
  * @param {HTMLInputElement|null} taskDueInput - datetime-local 输入框
  */
-function initializeDuePicker(dueButton, duePopover, duePopoverClose, taskDueInput) {
+function initializeDuePicker(dueButton, duePopover, duePopoverClose, duePopoverConfirm, taskDueInput) {
   if (!dueButton || !duePopover || !taskDueInput) return;
+
+  // 打开弹层前的已应用值，用于取消时回滚
+  let appliedValue = taskDueInput.value;
 
   /**
    * 根据当前 input 值更新按钮状态（不占用额外空间）
@@ -633,6 +631,7 @@ function initializeDuePicker(dueButton, duePopover, duePopoverClose, taskDueInpu
    * 打开弹层
    */
   function openPopover() {
+    appliedValue = taskDueInput.value;
     duePopover.hidden = false;
     dueButton.dataset.active = 'true';
     // 移除自动调用 showPicker，因为会让系统自带的和自定义弹窗同时出现
@@ -647,14 +646,31 @@ function initializeDuePicker(dueButton, duePopover, duePopoverClose, taskDueInpu
   }
 
   /**
-   * 应用快捷时间
+   * 放弃草稿，恢复打开前的值
+   */
+  function cancelPopover() {
+    taskDueInput.value = appliedValue;
+    syncButtonState(appliedValue);
+    closePopover();
+  }
+
+  /**
+   * 应用草稿值并关闭
+   */
+  function confirmPopover() {
+    appliedValue = taskDueInput.value;
+    syncButtonState(appliedValue);
+    closePopover();
+  }
+
+  /**
+   * 应用快捷时间（快捷项立即生效）
    * @param {string} preset - 预设类型
    */
   function applyPreset(preset) {
     if (preset === 'clear') {
       taskDueInput.value = '';
-      syncButtonState(taskDueInput.value);
-      closePopover();
+      confirmPopover();
       return;
     }
 
@@ -662,24 +678,23 @@ function initializeDuePicker(dueButton, duePopover, duePopoverClose, taskDueInpu
     if (!target) return;
 
     taskDueInput.value = toDatetimeLocalValue(target);
-    syncButtonState(taskDueInput.value);
-    closePopover();
+    confirmPopover();
   }
 
   dueButton.addEventListener('click', (e) => {
     e.preventDefault();
     if (duePopover.hidden) openPopover();
-    else closePopover();
+    else confirmPopover();
   });
 
   duePopoverClose?.addEventListener('click', (e) => {
     e.preventDefault();
-    closePopover();
+    cancelPopover();
   });
 
-  taskDueInput.addEventListener('change', () => {
-    syncButtonState(taskDueInput.value);
-    closePopover();
+  duePopoverConfirm?.addEventListener('click', (e) => {
+    e.preventDefault();
+    confirmPopover();
   });
 
   duePopover.querySelectorAll('.due-quick').forEach((btn) => {
@@ -693,7 +708,15 @@ function initializeDuePicker(dueButton, duePopover, duePopoverClose, taskDueInpu
   document.addEventListener('click', (e) => {
     if (duePopover.hidden) return;
     if (duePopover.contains(e.target) || dueButton.contains(e.target)) return;
-    closePopover();
+    cancelPopover();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (duePopover.hidden) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelPopover();
+    }
   });
 
   syncButtonState(taskDueInput.value);
@@ -701,29 +724,23 @@ function initializeDuePicker(dueButton, duePopover, duePopoverClose, taskDueInpu
 
 /**
  * 更新截止时间按钮的视觉状态
- * 用 title 提示具体截止时间，按钮本身保持紧凑，避免表单区域变复杂
+ * 按钮直接显示已选时间，未选择时显示“时间”
  * @param {HTMLButtonElement|null} dueButton - 触发按钮
  * @param {string} dueValue - datetime-local 的本地时间值
  */
 function updateDueButtonState(dueButton, dueValue) {
   if (!dueButton) return;
 
-  dueButton.textContent = '时间';
+  const label = dueValue ? formatDueShort(dueValue) : '';
 
-  if (!dueValue) {
+  if (!label) {
+    dueButton.textContent = '时间';
     dueButton.removeAttribute('data-has-value');
     dueButton.title = '设置截止时间';
     return;
   }
 
-  const date = new Date(dueValue);
-  const label = date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-
+  dueButton.textContent = formatDueButtonLabel(dueValue);
   dueButton.setAttribute('data-has-value', 'true');
   dueButton.title = `截止：${label}`;
 }

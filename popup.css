@@ -232,6 +232,10 @@ body {
 
 .due-button {
   flex: 0 0 auto;
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 5px 10px;
   background: transparent;
   border: 1px solid var(--border-light);
@@ -254,9 +258,8 @@ body {
   color: var(--text-primary);
 }
 
-.due-button[data-has-value="true"]::after {
-  content: '·';
-  margin-left: 6px;
+.due-button[data-has-value="true"] {
+  border-color: var(--text-primary);
   color: var(--text-primary);
 }
 
@@ -279,7 +282,7 @@ body {
   display: flex;
   gap: 12px;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .due-date-input {
@@ -334,6 +337,30 @@ body {
 .due-quick:hover {
   border-color: var(--text-primary);
   color: var(--text-primary);
+  transform: scale(0.98);
+}
+
+.due-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.due-popover-confirm {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  border: 1px solid var(--brand-color);
+  background: var(--brand-color);
+  color: var(--bg-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s var(--ease-out-expo), opacity 0.2s ease;
+}
+
+.due-popover-confirm:hover {
+  opacity: 0.9;
   transform: scale(0.98);
 }
 

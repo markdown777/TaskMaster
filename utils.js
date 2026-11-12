@@ -245,6 +245,14 @@ function formatDueShort(date, now = new Date()) {
   return `${d.getFullYear()}-${monthDay} ${time}`;
 }
 
+/**
+ * 新建任务按钮文案：未选时间显示“时间”，已选则直接显示所选时间
+ */
+function formatDueButtonLabel(dueValue, now = new Date()) {
+  if (!dueValue) return '时间';
+  return formatDueShort(dueValue, now) || '时间';
+}
+
 // 导出工具函数
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -262,6 +270,7 @@ if (typeof module !== 'undefined' && module.exports) {
     isYesterday,
     isSameDay,
     isOverdue,
-    formatDueShort
+    formatDueShort,
+    formatDueButtonLabel
   };
 }
